@@ -119,8 +119,6 @@ values = {
     'dalvik.vm.usejit': 'true',
     'dalvik.vm.usejitprofiles': 'true',
     'dalvik.vm.checkjni': 'false',
-    'dalvik.vm.usejit': 'true',
-    'dalvik.vm.usejitprofiles': 'true',
     'ro.kernel.android.checkjni': '0',
     'ro.setupwizard.mode': 'DISABLED',
     'debug.sf.nobootanimation': '0',

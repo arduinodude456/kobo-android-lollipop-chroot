@@ -189,19 +189,18 @@ set_prop_file() {
         END { if (!seen) print k "=" v }' "$f" > "$tmp" || { rm -f "$tmp"; return 0; }
     cat "$tmp" > "$f"; rm -f "$tmp"
 }
-# Dalvik: "v=n,o=n" (keine Verifikation, keine Optimierung) macht jede App dauerhaft langsamer, weil der
-# Interpreter ohne quickened Opcodes laeuft und Klassen zur Laufzeit verifiziert werden. v=r,o=v ist der
-# Standard echter Lollipop-Geraete; der Cache bleibt in /data erhalten, die Kosten fallen nur einmal an.
+# ART verwendet auf API 21 den Compiler-Filter balanced; der Cache bleibt in /data erhalten und wird
+# nach dem ersten Start wiederverwendet. Der Schalter vermeidet die unoptimierte verify-only Variante.
 apply_perf_tuning() {
     bp="$ROOTFS/system/build.prop"
-    set_prop_file "$bp" dalvik.vm.dex2oat-flags 'v=r,o=v'
+    set_prop_file "$bp" dalvik.vm.dex2oat-filter balanced
     set_prop_file "$bp" dalvik.vm.checkjni false
     set_prop_file "$bp" dalvik.vm.heapminfree 1m
     set_prop_file "$bp" dalvik.vm.heapmaxfree 4m
     rc="$ROOTFS/init.rc"
-    if [ -f "$rc" ] && grep -q 'dalvik.vm.dex2oat-flags' "$rc"; then
+    if [ -f "$rc" ] && grep -q 'dalvik.vm.dex2oat-filter' "$rc"; then
         tmp="$RUN/init.rc.perf"
-        awk '$1 == "setprop" && $2 == "dalvik.vm.dex2oat-flags" { print "    setprop dalvik.vm.dex2oat-flags v=r,o=v"; next } { print }' "$rc" > "$tmp" \
+        awk '$1 == "setprop" && $2 == "dalvik.vm.dex2oat-filter" { print "    setprop dalvik.vm.dex2oat-filter balanced"; next } { print }' "$rc" > "$tmp" \
             && cat "$tmp" > "$rc"
         rm -f "$tmp"
     fi
