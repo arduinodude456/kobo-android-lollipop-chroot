@@ -7,6 +7,8 @@ on early-init
     mkdir /dev/pts 0755 root root
     mkdir /dev/kobo 0770 system graphics
     mkdir /dev/input 0755 root root
+    mount devpts devpts /dev/pts
+    symlink /dev/pts/ptmx /dev/ptmx
 
 on init
     export LD_PRELOAD /system/lib/libkobofb.so
@@ -56,19 +58,34 @@ on init
     setprop ro.bootmode unknown
     setprop ro.factorytest 0
     setprop ro.crypto.state unencrypted
-    setprop vold.decrypt trigger_restart_framework
-    # KitKat's system_server instantiates its own SurfaceFlinger unless told not to;
+    trigger nonencrypted
+    # Lollipop's system_server instantiates its own SurfaceFlinger unless told not to;
     # that would collide with the surfaceflinger service below and leave no display.
     setprop system_init.startsurfaceflinger 0
     setprop debug.sf.nohwcomposer 1
     setprop persist.sys.usb.config none
 
+on fs
+    setprop ro.crypto.state unencrypted
+    trigger nonencrypted
+
+on nonencrypted
+    class_start late_start
+
 on post-fs-data
     load_persist_props
+    setprop vold.post_fs_data_done 1
 
 on boot
     class_start core
+
+on property:kobo.healthd.ready=1
     class_start main
+
+service healthd /sbin/healthd
+    class core
+    user root
+    group root system
 
 service servicemanager /system/bin/servicemanager
     class core
@@ -90,7 +107,7 @@ service media /system/bin/mediaserver
     user media
     group audio camera inet net_bt net_bt_admin net_bw_acct drmrpc mediadrm
 
-# KitKat/Lollipop system_server blocks in NetworkManagementService until netd's socket exists.
+# Lollipop/Lollipop system_server blocks in NetworkManagementService until netd's socket exists.
 service netd /system/bin/netd
     class main
     socket netd stream 0660 root system
@@ -110,5 +127,6 @@ service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-sys
     class main
     socket zygote stream 0660 root system
 
+# Dynamic kobo_healthd provides batteryproperties through the Binder ABI shim.
 # No critical-service reboot actions and no sys.powerctl trigger. Container
 # lifecycle belongs to the Kobo supervisor, not Android's global reboot API.

@@ -5,7 +5,7 @@
  * Android laeuft als Chroot im Netzwerk-Namespace des Kobo: Sockets, Routen und DNS-Server des
  * Hosts sind fuer Android bereits nutzbar. Es fehlt nur, dass Androids ConnectivityService ein
  * "verbundenes" Netz sieht; ohne das melden Browser, DownloadProvider und viele Apps "keine
- * Verbindung". KitKat bekommt seinen Wi-Fi-Zustand von WifiStateMachine, und die spricht mit
+ * Verbindung". Lollipop bekommt seinen Wi-Fi-Zustand von WifiStateMachine, und die spricht mit
  * wpa_supplicant (Kontrollsocket /data/misc/wifi/sockets/<iface>) und dhcpcd. Beide ersetzt
  * dieses Programm durch schlanke Spiegel des Host-Zustands:
  *
@@ -220,7 +220,7 @@ static void kw_schedule(struct kw *w, int kind, long delay_ms)
 }
 
 /*
- * KitKat-WifiMonitor ordnet Ereignisse OHNE "IFNAME=<iface> " dem p2p0-Monitor zu (nicht wlan0);
+ * Lollipop-WifiMonitor ordnet Ereignisse OHNE "IFNAME=<iface> " dem p2p0-Monitor zu (nicht wlan0);
  * der echte Supplicant haengt das Praefix an. Deshalb: "<3>IFNAME=wlan0 CTRL-EVENT-...".
  */
 static void kw_emit(struct kw *w, const char *text)
@@ -322,7 +322,7 @@ static size_t kw_command(struct kw *w, int si, const struct sockaddr_un *from, s
     char enc[300];
     int n = 0;
 
-    /* KitKat sendet jeden Befehl als "IFNAME=wlan0 <Befehl>" (Multi-Interface-Supplicant). */
+    /* Lollipop sendet jeden Befehl als "IFNAME=wlan0 <Befehl>" (Multi-Interface-Supplicant). */
     if (!strncmp(cmd, "IFNAME=", 7)) {
         const char *sp = strchr(cmd, ' ');
         cmd = sp ? sp + 1 : "";
@@ -384,7 +384,7 @@ static size_t kw_command(struct kw *w, int si, const struct sockaddr_un *from, s
         if (w->link_up && n > 0 && (size_t)n < cap)
             n += snprintf(out + n, cap - (size_t)n, "%s\t%d\t%d\t[ESS]\t%s\n", KW_FAKE_BSSID, KW_FREQ, KW_RSSI, enc);
     } else if (has_word(cmd, "BSS")) {
-        /* KitKat: "BSS RANGE=<sid>- MASK=..." liefert Eintraege ab id sid; leere Antwort beendet die Schleife. */
+        /* Lollipop: "BSS RANGE=<sid>- MASK=..." liefert Eintraege ab id sid; leere Antwort beendet die Schleife. */
         const char *r = strstr(cmd, "RANGE=");
         int sid = r ? atoi(r + 6) : (cmd[3] == ' ' ? atoi(cmd + 4) : 0);
         kw_encode_ssid(w->ssid, enc, sizeof enc);
@@ -439,12 +439,12 @@ static const char *kw_dir(void)
 }
 
 /*
- * KitKat (libhardware_legacy wifi.c, wifi_connect_to_supplicant) sucht den Kontrollsocket des
+ * Lollipop (libhardware_legacy wifi.c, wifi_connect_to_supplicant) sucht den Kontrollsocket des
  * PRIMAeren Interfaces NICHT in /data/misc/wifi/sockets (das gilt nur fuer Zweit-Schnittstellen und
  * ab Android 5), sondern
  *   - existiert IFACE_DIR = /data/system/wpa_supplicant:  IFACE_DIR/<iface>
  *   - sonst der Name <iface> ohne "/": wpa_ctrl_open macht daraus /dev/socket/<iface>.
- * Die Attrappe lauscht deshalb auf allen diesen Pfaden (und legt IFACE_DIR an, damit KitKat den
+ * Die Attrappe lauscht deshalb auf allen diesen Pfaden (und legt IFACE_DIR an, damit Lollipop den
  * absoluten Pfad nimmt). Mit gesetztem KOBO_WPA_DIR (Tests) gibt es die Zusatzpfade nur ueber
  * KOBO_WPA_ALT_DIR / KOBO_WPA_INIT_DIR, damit Tests nie den Host anfassen.
  */
@@ -534,7 +534,7 @@ static int kw_supplicant(const char *iface)
     signal(SIGPIPE, SIG_IGN);
     alt = kw_alt_dir();
     idir = kw_init_dir();
-    /* 1. KitKat-Primaerpfad: IFACE_DIR/<iface> (Verzeichnis anlegen -> Android waehlt diesen Zweig) */
+    /* 1. Lollipop-Primaerpfad: IFACE_DIR/<iface> (Verzeichnis anlegen -> Android waehlt diesen Zweig) */
     if (alt && (s = kw_bind_ctrl(alt, iface, path, sizeof path, 1)) >= 0) {
         w->socks[w->nsock] = s; snprintf(w->paths[w->nsock++], sizeof w->paths[0], "%s", path);
     }
@@ -607,7 +607,7 @@ static int kw_supplicant(const char *iface)
 
 /*
  * --probe IFACE: Selbsttest ohne Android-Logs. Verhaelt sich wie wifi_connect_to_supplicant +
- * wpa_ctrl_open aus system_server (uid 1000, Gruppe wifi): waehlt den Pfad wie KitKat, bindet einen
+ * wpa_ctrl_open aus system_server (uid 1000, Gruppe wifi): waehlt den Pfad wie Lollipop, bindet einen
  * Client-Socket in /data/misc/wifi/sockets, verbindet und sendet PING. Gibt je Kandidat den
  * genauen errno aus -- damit zeigt net.txt, ob es an Pfad oder Rechten liegt.
  */
@@ -666,7 +666,7 @@ static int kw_probe(const char *iface)
         printf("probe: uid=%d gid=%d\n", (int)getuid(), (int)getgid());
         if (alt) {
             snprintf(path, sizeof path, "%s/%s", alt, iface);
-            printf("probe: IFACE_DIR %s %s -> KitKat nimmt %s\n", alt, access(alt, F_OK) == 0 ? "vorhanden" : "FEHLT",
+            printf("probe: IFACE_DIR %s %s -> Lollipop nimmt %s\n", alt, access(alt, F_OK) == 0 ? "vorhanden" : "FEHLT",
                    access(alt, F_OK) == 0 ? path : "/dev/socket/<iface>");
             kw_probe_one("IFACE_DIR", path);
         }

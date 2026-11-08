@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Minimaler vold-Ersatz fuer den Kobo-Chroot (KitKat/API 19).
+ * Minimaler vold-Ersatz fuer den Kobo-Chroot (Lollipop/API 21).
  *
  * Im Chroot laeuft kein echtes vold (Kernel-/Mount-Zugriff unerwuenscht). system_server
  * (MountService) wartet aber endlos ("Thread main still waiting for MountService ready...",

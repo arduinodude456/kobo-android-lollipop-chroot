@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MIT
--- Android KitKat through a loopback-only RFB 3.8 connection. No external viewer.
+-- Android Lollipop through a loopback-only RFB 3.8 connection. No external viewer.
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Font = require("ui/font")

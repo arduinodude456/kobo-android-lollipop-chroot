@@ -93,11 +93,11 @@ class RuntimeTests(unittest.TestCase):
             stage = base / 'stage'
             with mock.patch.object(builder, 'validate'):
                 builder.prepare(product, stage)
-            self.assertEqual((stage / 'kobo-chroot').read_text(), 'android-kitkat_api19\n')
+            self.assertEqual((stage / 'kobo-chroot').read_text(), 'android-lollipop_api21\n')
             runtime = (ROOT / 'runtime/android.sh').read_text()
             self.assertIn('"$ROOTFS/kobo-chroot"', runtime)
-            self.assertIn("= 'android-kitkat_api19'", runtime)
-            self.assertIn('KitKat/API-19-Image erforderlich', runtime)
+            self.assertIn("= 'android-lollipop_api21'", runtime)
+            self.assertIn('Lollipop/API-21-Image erforderlich', runtime)
             self.assertIn('access("/kobo-chroot", F_OK)', (ROOT / 'runtime/kobo-container.c').read_text())
             with self.assertRaises(ValueError):
                 builder.image(stage, base / 'too-large.img', 4096)

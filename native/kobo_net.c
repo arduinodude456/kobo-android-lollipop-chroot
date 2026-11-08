@@ -65,7 +65,7 @@ int kobo_net_hides_path(const char *path, int flags)
     return (flags & O_ACCMODE) != O_RDONLY;
 }
 
-/* libnetutils-Einstiegspunkte (KitKat): per Preload ueberlagert, damit netd/NetworkUtils den Host
+/* libnetutils-Einstiegspunkte (Lollipop): per Preload ueberlagert, damit netd/NetworkUtils den Host
  * nicht veraendern. Rueckgabe 0 = Erfolg. */
 #define NOOP(sig, label) int sig { guard_log(label); return 0; }
 NOOP(ifc_clear_addresses(const char *name), "ifc_clear_addresses")

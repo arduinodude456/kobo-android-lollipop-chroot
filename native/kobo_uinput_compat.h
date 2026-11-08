@@ -6,8 +6,8 @@
 #include <sys/ioctl.h>
 #include <linux/input.h>
 
-/* NDK r10e's API-19 ARM sysroot has linux/input.h but omits linux/uinput.h.
- * These definitions are the stable legacy uinput ABI used by KitKat. */
+/* NDK r10e's API-21 ARM sysroot has linux/input.h but omits linux/uinput.h.
+ * These definitions are the stable legacy uinput ABI used by Lollipop. */
 #ifndef UINPUT_IOCTL_BASE
 #define UINPUT_IOCTL_BASE 'U'
 #endif

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch only the exact android-4.4.4_r2 files; never silently accept drift."""
+"""Patch only the exact android-5.0.2_r2 files; never silently accept drift."""
 import argparse
 import hashlib
 import json
@@ -52,7 +52,7 @@ def patch_init(text):
         if anchor not in text:
             raise ValueError('missing bootstrap action: ' + name)
         text = text.replace(anchor, '    /* ' + MARKER + ': skip ' + name + '. */')
-    # KitKat queues these directly in main(), unlike newer Android releases
+    # Lollipop queues these directly in main(), unlike newer Android releases
     # whose init.rc needs an on late-init trigger chain. Do not double-queue.
     for required in ('property_init();', 'property_service_init_action', 'signal_init_action',
                      'action_for_each_trigger("post-fs-data", action_add_queue_tail);',
@@ -137,7 +137,7 @@ def apply(root, record):
         path.write_bytes(patched)
         records.append({'path': relative, 'original_sha256': digest(original), 'patched_sha256': digest(patched)})
     record.parent.mkdir(parents=True, exist_ok=True)
-    record.write_text(json.dumps({'release': 'android-4.4.4_r2', 'marker': MARKER, 'patches': records}, indent=2) + '\n')
+    record.write_text(json.dumps({'release': 'android-5.0.2_r2', 'marker': MARKER, 'patches': records}, indent=2) + '\n')
 
 
 def main():

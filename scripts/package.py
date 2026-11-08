@@ -137,7 +137,7 @@ def package(root, build, product, dist):
     # This file lists every payload file, including manifest.json, but not itself.
     checksum_lines = [sha256(path) + '  ' + path.relative_to(pkg).as_posix() for path in sorted(pkg.rglob('*')) if path.is_file()]
     (pkg / 'SHA256SUMS').write_text('\n'.join(checksum_lines) + '\n')
-    archive = dist / 'kobo-android-kitkat.tar.gz'
+    archive = dist / 'kobo-android-lollipop.tar.gz'
     # Tar includes .adds by explicit path, not a wildcard that omits dotfiles.
     with archive.open('wb') as output, gzip.GzipFile(filename='', mode='wb', fileobj=output, mtime=0, compresslevel=6) as compressed:
         with tarfile.open(fileobj=compressed, mode='w', format=tarfile.PAX_FORMAT) as tar:

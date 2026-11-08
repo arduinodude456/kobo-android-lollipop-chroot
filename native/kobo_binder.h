@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * LD_PRELOAD helper that lets KitKat API 19 (32 bit binder ABI, protocol 7) talk to
+ * LD_PRELOAD helper that lets Lollipop API 21 (32 bit binder ABI, protocol 7) talk to
  * a Linux kernel built without CONFIG_ANDROID_BINDER_IPC_32BIT (64 bit ABI,
  * protocol 8). Only BINDER_VERSION and BINDER_WRITE_READ need translating; all
  * other binder ioctls have identical numbers and payloads on both sides.

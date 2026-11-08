@@ -23,7 +23,7 @@ KOBO_PERF_MOUNT=1
 KOBO_NOSYNC=1
 # Log-Ausfuehrlichkeit von android.log: 3 = Debug (viel Text, langsamer), 4 = Info, 5 = Warnungen.
 KOBO_LOG_LEVEL=4
-# Dalvik-Cache einmalig verwerfen, damit alle Apps mit Optimierung (v=r,o=v) neu gebaut werden. Der erste
+# ART-Cache einmalig verwerfen, damit alle Apps mit Optimierung (v=r,o=v) neu gebaut werden. Der erste
 # Boot danach braucht mehrere Minuten. 0 = Cache behalten (nur neue Apps werden optimiert).
 KOBO_DEXOPT_REBUILD=1
 # Sekunden zwischen den Diagnose-Schnappschuessen (logcat.txt, crash.txt) nach dem Boot.

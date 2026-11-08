@@ -2,7 +2,7 @@
 /*
  * Binder 32 -> 64 bit ABI translation (see kobo_binder.h / kobo_binder_abi.h).
  *
- * Android KitKat/API 19 userspace talks protocol 7 with 32 bit structures. The Kobo kernel
+ * Android Lollipop/API 21 userspace talks protocol 7 with 32 bit structures. The Kobo kernel
  * (4.9.77) speaks protocol 8 with 64 bit structures and rejects the 24 byte
  * BINDER_WRITE_READ (0xc0186201) with -EINVAL; only the 48 byte one is known.
  *

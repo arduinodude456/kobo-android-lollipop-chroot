@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 cd /aosp
-# envsetup.sh is not nounset-safe in KitKat.
+# envsetup.sh is not nounset-safe in Lollipop.
 source build/envsetup.sh
 lunch kobo_libra_colour-userdebug
 java -version

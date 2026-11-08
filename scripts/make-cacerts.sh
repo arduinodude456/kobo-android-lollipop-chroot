@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Erzeugt runtime/cacerts/ (Android-4.4-Format HASH.0, alter OpenSSL-Hash) aus einem PEM-Bundle.
-# KitKat kennt moderne Wurzeln (z. B. ISRG Root X1) nicht; ohne sie scheitern fast alle HTTPS-Seiten.
+# Erzeugt runtime/cacerts/ (Android-5.0-Format HASH.0, alter OpenSSL-Hash) aus einem PEM-Bundle.
+# Lollipop kennt moderne Wurzeln (z. B. ISRG Root X1) nicht; ohne sie scheitern fast alle HTTPS-Seiten.
 # Aufruf: bash scripts/make-cacerts.sh cacert.pem   (z. B. aus "pip download certifi" oder curl.se/ca)
 set -euo pipefail
 bundle="${1:?PEM-Bundle fehlt}"

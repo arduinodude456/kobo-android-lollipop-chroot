@@ -2,7 +2,7 @@
 /*
  * Binder ABI descriptions for the 32 -> 64 bit translation shim.
  *
- *   kb_u_*  what Android KitKat/API 19 userspace speaks (BINDER_IPC_32BIT, protocol 7):
+ *   kb_u_*  what Android Lollipop/API 21 userspace speaks (BINDER_IPC_32BIT, protocol 7):
  *           every pointer / size_t field is 32 bit.
  *   kb_k_*  what the Kobo kernel (4.9.77, no CONFIG_ANDROID_BINDER_IPC_32BIT,
  *           protocol 8) expects: binder_size_t / binder_uintptr_t are 64 bit.

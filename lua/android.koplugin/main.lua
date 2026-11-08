@@ -65,7 +65,7 @@ function Android:addToMainMenu(items)
             ok_callback=function() run_android_cmd("wipe","Android entfernen","Entferne Android-Image ...") end,
         })
     end}
-    items.kobo_android={text="Android KitKat 4.4 (Chroot)",sorting_hint="tools",callback=function()
+    items.kobo_android={text="Android Lollipop 5.0 (Chroot)",sorting_hint="tools",callback=function()
         local base=os.getenv("KOBO_ANDROID_DIR") or "/mnt/onboard/.adds/android"
         local ok,module=pcall(dofile,base.."/lua/appdock_android.lua")
         if not ok then UIManager:show(InfoMessage:new{text="Android-Modul konnte nicht geladen werden:\n"..tostring(module)}); return end

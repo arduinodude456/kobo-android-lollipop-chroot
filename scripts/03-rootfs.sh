@@ -15,7 +15,7 @@ if [[ -x "$FS_CONFIG" ]]; then
         < "$BUILD/rootfs-files.txt" > "$BUILD/rootfs-fs-config.txt"
     sudo python3 "$ROOT/scripts/rootfs.py" apply-config --stage "$STAGE" --config "$BUILD/rootfs-fs-config.txt"
 else
-    # The SDK API-19 system partition and ramdisk were copied as root, preserving
+    # The SDK API-21 system partition and ramdisk were copied as root, preserving
     # their native uid/gid, modes and symlinks; do not replace them with AOSP fs_config.
     echo 'Using file ownership and modes preserved from the verified SDK image.'
 fi

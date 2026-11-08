@@ -70,7 +70,7 @@ KB_ASSERT(t_h, BINDER_TYPE_HANDLE == KB_TYPE_HANDLE);
 KB_ASSERT(t_wh, BINDER_TYPE_WEAK_HANDLE == KB_TYPE_WEAK_HANDLE);
 KB_ASSERT(t_fd, BINDER_TYPE_FD == KB_TYPE_FD);
 KB_ASSERT(proto, BINDER_CURRENT_PROTOCOL_VERSION == KB_PROTOCOL_KERNEL);
-/* the numbers seen in the device dmesg: c0186201 (KitKat API 19) vs c0306201 (kernel) */
+/* the numbers seen in the device dmesg: c0186201 (Lollipop API 21) vs c0306201 (kernel) */
 KB_ASSERT(lit_wr, BINDER_WRITE_READ == 0xc0306201u);
 KB_ASSERT(lit_ver, BINDER_VERSION == 0xc0046209u);
 int main(void) { return 0; }

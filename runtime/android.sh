@@ -20,7 +20,7 @@ KOBO_PERF_CPU=${KOBO_PERF_CPU:-1}            # CPU-Governor "performance" solang
 KOBO_PERF_MOUNT=${KOBO_PERF_MOUNT:-1}        # ext4: data=writeback,barrier=0,commit=60
 KOBO_NOSYNC=${KOBO_NOSYNC:-1}                # fsync/fdatasync in Android-Prozessen ohne Warten
 KOBO_LOG_LEVEL=${KOBO_LOG_LEVEL:-4}          # 3 = Debug (ausfuehrlich, langsamer), 4 = Info, 5 = Warnungen
-KOBO_DEXOPT_REBUILD=${KOBO_DEXOPT_REBUILD:-1} # Dalvik-Cache einmalig mit Optimierung neu aufbauen
+KOBO_DEXOPT_REBUILD=${KOBO_DEXOPT_REBUILD:-1} # ART-Cache einmalig mit Optimierung neu aufbauen
 KOBO_DIAG_INTERVAL=${KOBO_DIAG_INTERVAL:-15} # Sekunden zwischen Diagnose-Schnappschuessen nach dem Boot
 mkdir -p "$RUN"
 fail() { echo "Android: $*" >&2; exit 1; }
@@ -53,7 +53,7 @@ check() {
     "$BASE/bin/kobo-container" --check
     "$BASE/bin/kobo-vnc" --check
     grep -qw ext4 /proc/filesystems || fail 'Kernel unterstützt kein ext4.'
-    grep -qw devpts /proc/filesystems || fail 'Kernel unterstützt kein devpts; KitKat logwrapper benötigt PTYs.'
+    grep -qw devpts /proc/filesystems || fail 'Kernel unterstützt kein devpts; Lollipop logwrapper benötigt PTYs.'
     [ -e /dev/loop-control ] || [ -e /dev/loop0 ] || fail 'Kein Loop-Gerät vorhanden.'
     echo 'Kernel-Vorprüfung erfolgreich; dies ersetzt keinen Android-Gerätetest.'
 }
@@ -191,24 +191,24 @@ set_prop_file() {
 }
 # Dalvik: "v=n,o=n" (keine Verifikation, keine Optimierung) macht jede App dauerhaft langsamer, weil der
 # Interpreter ohne quickened Opcodes laeuft und Klassen zur Laufzeit verifiziert werden. v=r,o=v ist der
-# Standard echter KitKat-Geraete; der Cache bleibt in /data erhalten, die Kosten fallen nur einmal an.
+# Standard echter Lollipop-Geraete; der Cache bleibt in /data erhalten, die Kosten fallen nur einmal an.
 apply_perf_tuning() {
     bp="$ROOTFS/system/build.prop"
-    set_prop_file "$bp" dalvik.vm.dexopt-flags 'v=r,o=v'
+    set_prop_file "$bp" dalvik.vm.dex2oat-flags 'v=r,o=v'
     set_prop_file "$bp" dalvik.vm.checkjni false
     set_prop_file "$bp" dalvik.vm.heapminfree 1m
     set_prop_file "$bp" dalvik.vm.heapmaxfree 4m
     rc="$ROOTFS/init.rc"
-    if [ -f "$rc" ] && grep -q 'dalvik.vm.dexopt-flags' "$rc"; then
+    if [ -f "$rc" ] && grep -q 'dalvik.vm.dex2oat-flags' "$rc"; then
         tmp="$RUN/init.rc.perf"
-        awk '$1 == "setprop" && $2 == "dalvik.vm.dexopt-flags" { print "    setprop dalvik.vm.dexopt-flags v=r,o=v"; next } { print }' "$rc" > "$tmp" \
+        awk '$1 == "setprop" && $2 == "dalvik.vm.dex2oat-flags" { print "    setprop dalvik.vm.dex2oat-flags v=r,o=v"; next } { print }' "$rc" > "$tmp" \
             && cat "$tmp" > "$rc"
         rm -f "$tmp"
     fi
     marker="$ROOTFS/data/.kobo-dexopt-v1"
     if [ "${KOBO_DEXOPT_REBUILD:-1}" = 1 ] && [ ! -e "$marker" ]; then
         if [ -d "$ROOTFS/data/dalvik-cache" ]; then
-            echo "Dalvik-Cache wird einmalig neu optimiert; der naechste Boot dauert dadurch laenger (Optimizing apps)."
+            echo "ART-Cache wird einmalig neu optimiert; der naechste Boot dauert dadurch laenger (Optimizing apps)."
             # Cache-Dateien heissen system@app@Name.apk@classes.dex; Unterordner (profiles) bleiben erhalten.
             rm -f "$ROOTFS/data/dalvik-cache"/*@* 2>/dev/null || true
         fi
@@ -267,7 +267,7 @@ stages_body() {
     echo "=== STUFE 2: ext4-Image per Loop einbinden"
     mkdir -p "$ROOTFS"
     out=$(mount -t ext4 -o loop,noatime,nosuid "$BASE/rootfs.img" "$ROOTFS" 2>&1) || { bad 2 "$out"; return 1; }
-    [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || { bad 2 "KitKat/API-19-Rootfs fehlt (altes Image sichern, rootfs.img entfernen und neu installieren)"; return 1; }
+    [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-lollipop_api21' ] || { bad 2 "Lollipop/API-21-Rootfs fehlt (altes Image sichern, rootfs.img entfernen und neu installieren)"; return 1; }
     echo "Rootfs-Marker: $(cat "$ROOTFS/kobo-chroot")  Dateien in /system/bin: $(ls "$ROOTFS/system/bin" | wc -l)"
     ok 2
     echo "=== STUFE 3: Android-Shell im Chroot (ARM-Linker, bionic)"
@@ -339,7 +339,7 @@ bootwatch() {
             echo "init.svc.healthd=$(gp init.svc.healthd)"
             echo "--- ps (Android-Prozesse):"
             ls -l /proc/[0-9]*/root 2>/dev/null | awk -v r="$ROOTFS" '$NF == r { split($(NF-2), a, "/"); print a[3] }' | while read -r apid; do echo "$apid $(cat "/proc/$apid/comm" 2>/dev/null)"; done
-            echo "--- service check batterypropreg (KitKat-Name):"
+            echo "--- service check batterypropreg (Lollipop-Name):"
             "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batterypropreg 2>&1
             echo "--- service check batteryproperties:"
             "$ENVB" -i PATH=/system/bin LD_PRELOAD=/system/lib/libkobofb.so "$CHROOTB" "$ROOTFS" /system/bin/service check batteryproperties 2>&1
@@ -513,7 +513,7 @@ net_install() {
     printf '<?xml version="1.0" encoding="utf-8"?>\n<permissions>\n    <feature name="android.hardware.wifi" />\n</permissions>\n' > "$ROOTFS/system/etc/permissions/kobo-wifi.xml"
     chmod 0644 "$ROOTFS/system/etc/permissions/kobo-wifi.xml"
     mkdir -p "$ROOTFS/data/misc/wifi/sockets" "$ROOTFS/data/misc/dhcp"
-    # KitKat sucht den Supplicant-Socket in IFACE_DIR=/data/system/wpa_supplicant (existiert das Verzeichnis)
+    # Lollipop sucht den Supplicant-Socket in IFACE_DIR=/data/system/wpa_supplicant (existiert das Verzeichnis)
     # bzw. /dev/socket/<iface>, NICHT in data/misc/wifi/sockets. kobo-wpa lauscht auf allen Pfaden.
     mkdir -p "$ROOTFS/data/system/wpa_supplicant"
     chown 1010:1010 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
@@ -522,7 +522,7 @@ net_install() {
     chmod 0770 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
     chown 1014:1000 "$ROOTFS/data/misc/dhcp" 2>/dev/null || true
     chmod 0770 "$ROOTFS/data/misc/dhcp" 2>/dev/null || true
-    # Aktuelle CA-Wurzeln: KitKat kennt z. B. ISRG Root X1 nicht -> sonst scheitert fast jedes HTTPS.
+    # Aktuelle CA-Wurzeln: Lollipop kennt z. B. ISRG Root X1 nicht -> sonst scheitert fast jedes HTTPS.
     if [ -d "$BASE/cacerts" ]; then
         mkdir -p "$ROOTFS/system/etc/security/cacerts"
         for c in "$BASE/cacerts"/*; do
@@ -612,7 +612,7 @@ run() {
     mkdir -p "$ROOTFS" "$RUN/shared"
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
     rootfs_mount
-    [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-kitkat_api19' ] || fail 'Falsches Rootfs: KitKat/API-19-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
+    [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-lollipop_api21' ] || fail 'Falsches Rootfs: Lollipop/API-21-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
     install_bundled_apps
     CHROOT_BIN=$(command -v chroot) || fail 'chroot nicht gefunden.'
     ENV_BIN=$(command -v env) || fail 'env nicht gefunden.'
@@ -665,7 +665,7 @@ run() {
     mkdir -p "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0"
     chmod 0777 "$PUBLIC_SHARED"
     mount -o bind "$PUBLIC_SHARED" "$ROOTFS/storage/emulated/0" || fail "Gemeinsamer Speicher konnte nicht gemountet werden: $PUBLIC_SHARED"
-    # Das KitKat-SDK-Image (storage_list.xml, goldfish) kennt als Primaerspeicher /storage/sdcard = EXTERNAL_STORAGE.
+    # Das Lollipop-SDK-Image (storage_list.xml, goldfish) kennt als Primaerspeicher /storage/sdcard = EXTERNAL_STORAGE.
     # /storage/sdcard liegt auf dem ext4-Rootfs (echte Unix-Rechte). Der FAT-Ordner $PUBLIC_SHARED
     # laesst Android-Apps (uid != root) nicht schreiben -> Amaze/Browser/Editor stuerzten ab.
     mkdir -p "$ROOTFS/storage/sdcard"
@@ -737,7 +737,7 @@ run() {
 }
 # ---- Optional: Google-Apps (Core) in das Android-Image installieren -----------------------------
 # Die ZIP (gapps-kern.zip) liegt NICHT im Repo; der Nutzer legt sie selbst auf den Kobo.
-# KitKat (API 19) scannt nur FLACHE APKs: /system/priv-app/Name.apk (Ordner pro App gibt es erst ab Android 5).
+# Lollipop (API 21) scannt nur FLACHE APKs: /system/priv-app/Name.apk (Ordner pro App gibt es erst ab Android 5).
 GAPPS_APKS="priv-app/SetupWizard.apk priv-app/GoogleFeedback.apk priv-app/GoogleOneTimeInitializer.apk priv-app/GoogleLoginService.apk priv-app/GooglePartnerSetup.apk priv-app/PrebuiltGmsCore.apk priv-app/Phonesky.apk priv-app/GoogleServicesFramework.apk priv-app/GoogleBackupTransport.apk app/GoogleContactsSyncAdapter.apk"
 # Frühere Version dieses Pakets legte fälschlich Ordner an; diese werden beim Installieren entfernt.
 GAPPS_LEGACY_DIRS="priv-app/SetupWizard priv-app/GoogleFeedback priv-app/GoogleOneTimeInitializer priv-app/GoogleLoginService priv-app/GooglePartnerSetup priv-app/PrebuiltGmsCore priv-app/Phonesky priv-app/GoogleServicesFramework priv-app/GoogleBackupTransport app/GoogleContactsSyncAdapter"
@@ -816,7 +816,7 @@ gapps_diag() {
         for f in priv-app/Phonesky.apk priv-app/PrebuiltGmsCore.apk priv-app/GoogleServicesFramework.apk priv-app/GoogleLoginService.apk priv-app/SetupWizard.apk lib/libgmscore.so; do
             ls -l "$ROOTFS/system/$f" 2>&1 | sed "s#^#$f: #"
         done
-        [ ! -d "$ROOTFS/system/priv-app/Phonesky" ] || echo 'WARNUNG: alter Ordner priv-app/Phonesky vorhanden (KitKat ignoriert Ordner). Neu installieren.'
+        [ ! -d "$ROOTFS/system/priv-app/Phonesky" ] || echo 'WARNUNG: alter Ordner priv-app/Phonesky vorhanden (Lollipop ignoriert Ordner). Neu installieren.'
         echo '--- In Android registriert (packages.xml)'
         if [ -f "$ROOTFS/data/system/packages.xml" ]; then
             ls -l "$ROOTFS/data/system/packages.xml"

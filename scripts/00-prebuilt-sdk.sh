@@ -2,20 +2,20 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
-ANDROID_API="${ANDROID_API:-19}"
-[[ "$ANDROID_API" = 19 ]] || { echo 'This Kobo chroot is KitKat-only: ANDROID_API must be 19' >&2; exit 1; }
+ANDROID_API="${ANDROID_API:-21}"
+[[ "$ANDROID_API" = 21 ]] || { echo 'This Kobo chroot is Lollipop-only: ANDROID_API must be 21' >&2; exit 1; }
 NDK_URL='https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip'
 NDK_SHA256='ee5f405f3b57c4f5c3b3b8b5d495ae12b660e03d2112e4ed5c728d349f1e520c'
-SDK_URL='https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-19_r05.zip'
-SDK_SHA256='ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7'
+SDK_URL='https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip'
+SDK_SHA256='4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520'
 NDK_PLATFORM="android-$ANDROID_API"
 DOWNLOADS="$BUILD/downloads"
-SDK_ZIP="$DOWNLOADS/sdk$ANDROID_API-arm.zip"
+SDK_ZIP="$DOWNLOADS/sdk21-arm.zip"
 NDK_ZIP="$DOWNLOADS/android-ndk-r10e.zip"
 SDK_DIR="$BUILD/sdk$ANDROID_API"
 NDK_DIR="$BUILD/ndk10"
 PRODUCT="$AOSP_DIR/out/target/product/libra_colour"
-MOUNT="$BUILD/sdk$ANDROID_API-mount"
+MOUNT="$BUILD/sdk21-mount"
 mkdir -p "$DOWNLOADS" "$BUILD/logs"
 
 fetch_verified() {
@@ -42,13 +42,13 @@ unzip -q "$NDK_ZIP" \
 
 SDK_IMAGE="$SDK_DIR/armeabi-v7a"
 [[ -s "$SDK_IMAGE/system.img" && -s "$SDK_IMAGE/ramdisk.img" ]] || {
-    echo 'Pinned SDK archive did not contain the expected API-19 KitKat ARM image' >&2; exit 1;
+    echo 'Pinned SDK archive did not contain the expected API-21 Lollipop ARM image' >&2; exit 1;
 }
 file "$SDK_IMAGE/system.img" | tee "$BUILD/logs/system-img-type.txt"
 SYSTEM_IS_EXT4=1
 file "$SDK_IMAGE/system.img" | grep -qiE 'ext[234]' || SYSTEM_IS_EXT4=0
 if [[ "$SYSTEM_IS_EXT4" = 0 ]]; then
-    # Keep a YAFFS2 fallback for repackaged API-19 images; the pinned r05 archive is ext4.
+    # Keep a YAFFS2 fallback for repackaged API-21 images; the pinned r05 archive is ext4.
     sudo apt-get install -y unyaffs >/dev/null 2>&1 || true
     command -v unyaffs >/dev/null || { echo "system.img is neither ext4 nor unpackable (unyaffs missing); see build/logs/system-img-type.txt" >&2; exit 1; }
     mkdir -p "$BUILD/yaffs-out"
@@ -93,7 +93,7 @@ values = {
     'ro.product.model': 'Libra Colour Android Chroot',
     'ro.product.manufacturer': 'community',
     'ro.hardware': 'kobo_libra_colour',
-    # KitKat-libEGL (Loader::open) waehlt libGLES_android.so (Software-GL) bei qemu=1 + qemu.gles=0
+    # Lollipop-libEGL (Loader::open) waehlt libGLES_android.so (Software-GL) bei qemu=1 + qemu.gles=0
     # (wie im bootenden QEMU-Referenzimage) oder ueber ro.hardware.egl. Sonst sucht es nach
     # libGLES_<ro.hardware>.so, findet nichts und surfaceflinger stirbt in eglGetDisplay (LOG_ALWAYS_FATAL).
     'ro.kernel.qemu': '1',
@@ -115,9 +115,12 @@ values = {
     'dalvik.vm.heaptargetutilization': '0.75',
     'dalvik.vm.heapminfree': '1m',
     'dalvik.vm.heapmaxfree': '4m',
-    'dalvik.vm.dexopt-flags': 'v=r,o=v',
+    'dalvik.vm.dex2oat-filter': 'balanced',
+    'dalvik.vm.usejit': 'true',
+    'dalvik.vm.usejitprofiles': 'true',
     'dalvik.vm.checkjni': 'false',
-    'dalvik.vm.execution-mode': 'int:jit',
+    'dalvik.vm.usejit': 'true',
+    'dalvik.vm.usejitprofiles': 'true',
     'ro.kernel.android.checkjni': '0',
     'ro.setupwizard.mode': 'DISABLED',
     'debug.sf.nobootanimation': '0',
@@ -157,7 +160,7 @@ COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -
 "$CC" "${COMMON[@]}" "$ROOT/runtime/kobo-container.c" -static -o "$NATIVE/kobo-container"
 # WLAN-Bruecke: wpa_supplicant-/dhcpcd-Attrappe, die den Host-Zustand an Androids Wi-Fi-Stack spiegelt.
 "$CC" "${COMMON[@]}" "$ROOT/native/kobo_wifi.c" -static -o "$NATIVE/kobo-wpa"
-# KitKat's /sbin/healthd is a STATIC executable: LD_PRELOAD (binder 32->64 bit shim) cannot reach it, so it can
+# Lollipop's /sbin/healthd is a STATIC executable: LD_PRELOAD (binder 32->64 bit shim) cannot reach it, so it can
 # never register "batteryproperties" on the Kobo kernel -> BatteryService NPE -> system_server/zygote restart loop.
 # Replace it with a dynamically linked bionic implementation that runs under the shim.
 "$CC" "${COMMON[@]}" "$ROOT/native/kobo_healthd.c" -o "$NATIVE/kobo-healthd"
@@ -181,15 +184,15 @@ sudo install -o root -g root -m 0755 "$NATIVE/kobo-healthd" "$PRODUCT/root/sbin/
 
 cat > "$BUILD/source-manifest.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
-<prebuilt id="android-kitkat-api19-armv7a" source="Google Android SDK system image" url="https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-19_r05.zip" sha256="ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7" />
+<prebuilt id="android-lollipop-api21-armv7a" source="Google Android SDK system image" url="https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-21_r04.zip" sha256="4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520" />
 EOF
-printf '%s\n' 'Android SDK API 19 KitKat ARM EABI v7a system image' > "$BUILD/AOSP-RELEASE.txt"
-printf '%s\n' 'prebuilt-system-image-sha256:ca7440cade53d829a8cace857cfad9afaa174c286d1b7a5d139e73cfcfde45d7' > "$BUILD/REPO-REVISION.txt"
+printf '%s\n' 'Android SDK API 21 Lollipop ARM EABI v7a system image' > "$BUILD/AOSP-RELEASE.txt"
+printf '%s\n' 'prebuilt-system-image-sha256:4f20bb4abff1fcda7fdde510993d2004b0ca330ae6e7a798ffecc3fbf6d48520' > "$BUILD/REPO-REVISION.txt"
 cat > "$BUILD/patches.json" <<'EOF'
 {"mode":"prebuilt-sdk-adaptation","changes":["replace emulator init with isolated Kobo init","set low-RAM software-rendered Kobo properties","remove emulator EGL/GLES shims","build Bionic framebuffer and Kobo helpers with NDK r10e","replace static /sbin/healthd with dynamic kobo-healthd (binder shim applies)","add minimal kobo-vold so MountService becomes ready","add kobo-wpa WLAN bridge and host-network guard in libkobofb"]}
 EOF
 cat > "$BUILD/build-container.json" <<'EOF'
-{"mode":"prebuilt-download-and-small-native-build","sdk":"Android KitKat API 19 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}
+{"mode":"prebuilt-download-and-small-native-build","sdk":"Android Lollipop API 21 ARM EABI v7a","ndk":"r10e","aosp-full-source-build":false}
 EOF
-printf 'Pinned KitKat API-19 ARM SDK staged; only native helpers were compiled.\n'
+printf 'Pinned Lollipop API-21 ARM SDK staged; only native helpers were compiled.\n'
 df -h "$BUILD" | tee "$BUILD/logs/disk-after-prebuilt.log"

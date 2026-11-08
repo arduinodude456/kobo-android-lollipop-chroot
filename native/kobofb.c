@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* This translation unit defines libc entry points. KitKat's fortified fcntl.h
+/* This translation unit defines libc entry points. Lollipop's fortified fcntl.h
  * otherwise also defines inline open/openat functions under platform flags. */
 #ifdef _FORTIFY_SOURCE
 #undef _FORTIFY_SOURCE
@@ -231,7 +231,7 @@ int ioctl(int fd, unsigned long request, ...)
 #endif
     ) { va_start(ap, request); arg = va_arg(ap, void *); va_end(ap); }
     if (kobo_net_blocks((unsigned long)request, arg)) return 0;
-    /* KitKat API 19 userspace speaks the 32 bit binder ABI, the kernel the 64 bit one. */
+    /* Lollipop API 21 userspace speaks the 32 bit binder ABI, the kernel the 64 bit one. */
     if (kobo_binder_wants((uint32_t)request)) return (int)kobo_binder_ioctl(fd, (unsigned long)request, arg, raw_ioctl);
     /* Framebuffer-ioctls haben den Typ 'F' (0x46xx). Alles andere (ashmem, binder-fremde, tty, FIONREAD ...)
      * geht ohne die beiden Zusatz-Syscalls (fstat+stat) aus fake_fd() direkt zum Kernel. */

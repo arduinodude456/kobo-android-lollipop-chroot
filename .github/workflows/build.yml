@@ -1,13 +1,13 @@
-name: Android KitKat API-19 ARM chroot for Kobo (experimental)
+name: Android Lollipop API-21 ARM chroot for Kobo (experimental)
 
 on:
   workflow_dispatch:
     inputs:
       android_api:
-        description: 'Android API (dieses Projekt verwendet KitKat)'
+        description: 'Android API (dieses Projekt verwendet Lollipop)'
         type: choice
-        default: '19'
-        options: ['19']
+        default: '21'
+        options: ['21']
   push:
     branches: [main]
   pull_request:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-kitkat-${{ github.ref }}
+  group: android-lollipop-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -51,7 +51,7 @@ jobs:
     env:
       JOBS: '2'
       ROOTFS_SIZE_MIB: '768'
-      ANDROID_API: ${{ inputs.android_api || '19' }}
+      ANDROID_API: ${{ inputs.android_api || '21' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install compact image-build dependencies
@@ -59,7 +59,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 cpio curl unzip gzip \
             e2fsprogs rsync file binutils
-      - name: Download pinned Android KitKat API-19 ARM SDK image and build Kobo helpers
+      - name: Download pinned Android Lollipop API-21 ARM SDK image and build Kobo helpers
         run: |
           set -o pipefail
           bash scripts/00-prebuilt-sdk.sh 2>&1 | tee build-prebuilt.log
@@ -74,14 +74,14 @@ jobs:
       - name: Upload install package
         uses: actions/upload-artifact@v4
         with:
-          name: kobo-android-kitkat-arm32-${{ github.sha }}
+          name: kobo-android-lollipop-arm32-${{ github.sha }}
           if-no-files-found: error
           compression-level: 0
           path: |
             dist/android-kobo.zip
             dist/android-kobo.zip.sha256
-            dist/kobo-android-kitkat.tar.gz
-            dist/kobo-android-kitkat.tar.gz.sha256
+            dist/kobo-android-lollipop.tar.gz
+            dist/kobo-android-lollipop.tar.gz.sha256
       - name: Upload provenance and logs even on failure
         if: always()
         uses: actions/upload-artifact@v4

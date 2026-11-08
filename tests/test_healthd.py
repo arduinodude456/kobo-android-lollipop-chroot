@@ -25,7 +25,7 @@ int main(void) {
     memcpy(&v, m + at + 4, 4); CK(v == 1);         /* AC online */
     memcpy(&v, m + at + 4 + 6 * 4, 4); CK(v == 100); /* Level */
     memcpy(&v, m + at + 32, 4); CK(v == 4200);       /* Spannung */
-    memcpy(&v, m + at + 36, 4); CK(v == 0);          /* batteryCurrentNow (KitKat 4.4.x) */
+    memcpy(&v, m + at + 36, 4); CK(v == 0);          /* batteryCurrentNow (Lollipop 5.0.x) */
     memcpy(&v, m + at + 40, 4); CK(v == 0);          /* batteryChargeCounter */
     memcpy(&v, m + at + 44, 4); CK(v == 250);        /* Temperatur: sonst Over-Temp-Shutdown */
     memcpy(&v, m + at + 48, 4); CK(v == 6);          /* Laenge "Li-ion" */

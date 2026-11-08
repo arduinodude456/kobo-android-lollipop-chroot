@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * Ersatz fuer den Android-Kernel-Logger (dev/log), den der Kobo-Kernel nicht hat und den es ohne
- * logd in Android KitKat/API 19 auch nicht gibt. libkobofb.so wird per LD_PRELOAD in jeden Prozess geladen und
+ * logd in Android Lollipop/API 21 auch nicht gibt. libkobofb.so wird per LD_PRELOAD in jeden Prozess geladen und
  * ueberlagert die liblog-Einstiegspunkte; die Meldungen landen in KOBO_LOG_FILE (Standard
  * /data/local/tmp/android.log). Kein Android-Header noetig, Signaturen stehen hier. */
 #include <errno.h>
@@ -51,7 +51,7 @@ int kobo_tunable(const char *name, int fallback)
 
 /* Android-Prioritaeten: 2 V, 3 D, 4 I, 5 W, 6 E, 7 F. Standard: Info und hoeher (KOBO_LOG_LEVEL=3 fuer Debug).
  * Das Logfile bleibt als Dateideskriptor offen (O_APPEND ist atomar); frueher kostete jede Zeile
- * getenv + open + write + close, und in KitKat sind es beim Booten viele tausend Zeilen. */
+ * getenv + open + write + close, und in Lollipop sind es beim Booten viele tausend Zeilen. */
 static int log_fd = -1, log_level = -1, log_pid;
 static void emit(int prio, const char *tag, const char *msg)
 {

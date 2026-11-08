@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Ersatz fuer /sbin/healthd (KitKat/API 19).
+ * Ersatz fuer /sbin/healthd (Lollipop/API 21).
  *
  * Das Original ist STATISCH gelinkt (LOCAL_FORCE_STATIC_EXECUTABLE). LD_PRELOAD
  * wirkt dort nicht, also greift die Binder-32->64-Bit-Uebersetzung aus
@@ -68,7 +68,7 @@ size_t kh_build_props(struct kh_buf *b)
     kh_i32(b, 1);                 /* present */
     kh_i32(b, 100);               /* Level */
     kh_i32(b, 4200);              /* mV */
-    kh_i32(b, 0);                 /* batteryCurrentNow (KitKat 4.4.x: Pflichtfeld vor Temperatur!) */
+    kh_i32(b, 0);                 /* batteryCurrentNow (Lollipop 5.0.x: Pflichtfeld vor Temperatur!) */
     kh_i32(b, 0);                 /* batteryChargeCounter (ebenso) */
     kh_i32(b, 250);               /* 0.1 Grad C */
     kh_str16(b, "Li-ion");
@@ -244,7 +244,7 @@ int main(void)
     if (ioctl(fd, (int)KB_VERSION, &ver) < 0 || ver != KB_PROTOCOL_USER) { klog("binder version %d (erwartet %d): LD_PRELOAD fehlt?", (int)ver, (int)KB_PROTOCOL_USER); return 1; }
     map = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) { logmsg("mmap failed"); return 1; }
-    /* KitKat (4.4.x) BatteryService sucht "batterypropreg"; "batteryproperties" gilt erst ab Android 5.
+    /* Lollipop (5.0.x) BatteryService sucht "batterypropreg"; "batteryproperties" gilt erst ab Android 5.
      * Beide Namen auf denselben Knoten registrieren. */
     {
         static const char *const names[2] = { "batterypropreg", "batteryproperties" };

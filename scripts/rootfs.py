@@ -61,7 +61,7 @@ def validate(stage):
         raise ValueError('Goldfish/emulation graphics driver unexpectedly installed')
     if 'BOOTCLASSPATH' not in (stage / 'init.environ.rc').read_text():
         raise ValueError('generated framework BOOTCLASSPATH missing')
-    if not any((stage / 'system').glob('**/Launcher2.apk')):
+    if not any((stage / 'system').glob('**/Launcher3.apk')) and not any((stage / 'system').glob('**/Launcher2.apk')):
         raise ValueError('Launcher2.apk missing')
     for app in ('Settings', 'SystemUI', 'LatinIME', 'PackageInstaller', 'SettingsProvider'):
         if not any((stage / 'system').glob('**/' + app + '.apk')):
@@ -84,7 +84,7 @@ def prepare(product, stage):
         if mountpoint.is_symlink() or mountpoint.is_file():
             mountpoint.unlink()
         mountpoint.mkdir(parents=True, exist_ok=True)
-    (stage / 'kobo-chroot').write_text('android-kitkat_api19\n')
+    (stage / 'kobo-chroot').write_text('android-lollipop_api21\n')
     validate(stage)
 
 
