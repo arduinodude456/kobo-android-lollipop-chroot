@@ -1,0 +1,101 @@
+name: Android KitKat API-19 ARM chroot for Kobo (experimental)
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_api:
+        description: 'Android API (dieses Projekt verwendet KitKat)'
+        type: choice
+        default: '19'
+        options: ['19']
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-kitkat-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install small validation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 python3-yaml luajit shellcheck
+      - name: Check scripts and run host-only tests
+        run: |
+          set -euo pipefail
+          for script in scripts/*.sh runtime/*.sh; do bash -n "$script"; done
+          python3 -m compileall -q scripts tests
+          make -C native test
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+          if [[ -f tests/test_lua.lua ]]; then luajit tests/test_lua.lua; fi
+          shellcheck -S error scripts/*.sh
+
+  build:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      JOBS: '2'
+      ROOTFS_SIZE_MIB: '768'
+      ANDROID_API: ${{ inputs.android_api || '19' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compact image-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 cpio curl unzip gzip \
+            e2fsprogs rsync file binutils
+      - name: Download pinned Android KitKat API-19 ARM SDK image and build Kobo helpers
+        run: |
+          set -o pipefail
+          bash scripts/00-prebuilt-sdk.sh 2>&1 | tee build-prebuilt.log
+      - name: Build ownership-correct ext4 chroot image
+        run: |
+          set -o pipefail
+          bash scripts/03-rootfs.sh 2>&1 | tee build/logs/rootfs.log
+      - name: Package runtime and verify manifest inputs
+        run: |
+          set -o pipefail
+          bash scripts/04-package.sh 2>&1 | tee build/logs/package.log
+      - name: Upload install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kobo-android-kitkat-arm32-${{ github.sha }}
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/android-kobo.zip
+            dist/android-kobo.zip.sha256
+            dist/kobo-android-kitkat.tar.gz
+            dist/kobo-android-kitkat.tar.gz.sha256
+      - name: Upload provenance and logs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-provenance-and-logs
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build-prebuilt.log
+            build/logs/
+            build/source-manifest.xml
+            build/AOSP-RELEASE.txt
+            build/REPO-REVISION.txt
+            build/patches.json
+            build/build-container.json
+            build/rootfs-fs-config.txt
+            build/rootfs.size

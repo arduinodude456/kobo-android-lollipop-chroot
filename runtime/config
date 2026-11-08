@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+# Trusted shell configuration; do not copy arbitrary downloaded shell commands here.
+# Kernel devices must already exist. The launcher never loads unverified modules.
+KOBO_BINDER_DEVICE=/dev/binder
+KOBO_ASHMEM_DEVICE=/dev/ashmem
+# Use the private PID/mount namespaces when available. On older Kobo kernels,
+# automatically fall back to a less isolated chroot so Android can start.
+# This fallback shares the host mount and PID namespaces and is less safe.
+KOBO_ALLOW_UNSAFE_NO_NAMESPACES=1
+# Display is deliberately fixed to 600x800 RGB565 in this low-RAM build.
+# VNC is deliberately fixed to IPv4 loopback 127.0.0.1:5963 (no network password).
+# WLAN-Bruecke (siehe docs/WLAN.md): 1 = Host-WLAN fuer Android sichtbar, 0 = aus.
+KOBO_NET=1
+# Host-Schnittstelle; leer = automatisch (Default-Route, sonst wlan0).
+KOBO_NET_IFACE=
+# ---- Leistung (siehe docs/PERFORMANCE.md) ----------------------------------------------------------
+# CPU-Governor "performance", solange Android laeuft (wird beim Beenden zurueckgesetzt). 0 = aus.
+KOBO_PERF_CPU=1
+# ext4-Mountoptionen data=writeback,barrier=0,commit=60 fuer das Image auf FAT32. 0 = konservativ.
+KOBO_PERF_MOUNT=1
+# fsync/fdatasync in Android-Prozessen ohne Warten. Nur bei hartem Stromausfall kann (hoechstens das letzte
+# commit-Intervall) verloren gehen; vor USB/Update immer "android.sh stop". 0 = aus.
+KOBO_NOSYNC=1
+# Log-Ausfuehrlichkeit von android.log: 3 = Debug (viel Text, langsamer), 4 = Info, 5 = Warnungen.
+KOBO_LOG_LEVEL=4
+# Dalvik-Cache einmalig verwerfen, damit alle Apps mit Optimierung (v=r,o=v) neu gebaut werden. Der erste
+# Boot danach braucht mehrere Minuten. 0 = Cache behalten (nur neue Apps werden optimiert).
+KOBO_DEXOPT_REBUILD=1
+# Sekunden zwischen den Diagnose-Schnappschuessen (logcat.txt, crash.txt) nach dem Boot.
+KOBO_DIAG_INTERVAL=15

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <fraction name="def_window_animation_scale">0%</fraction>
+    <fraction name="def_window_transition_scale">0%</fraction>
+    <bool name="def_accelerometer_rotation">false</bool>
+    <bool name="def_device_provisioned">true</bool>
+    <bool name="def_screen_brightness_automatic_mode">false</bool>
+    <integer name="def_screen_off_timeout">2147483647</integer>
+    <!-- LatinIME is included in the product; make it the initial active IME. -->
+    <string name="def_input_method" translatable="false">com.android.inputmethod.latin/.LatinIME</string>
+    <string name="def_enabled_input_methods" translatable="false">com.android.inputmethod.latin/.LatinIME</string>
+</resources>

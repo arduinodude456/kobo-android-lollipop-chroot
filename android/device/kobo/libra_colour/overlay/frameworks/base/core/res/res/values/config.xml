@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="config_avoidGfxAccel">true</bool>
+    <bool name="config_sf_limitedAlpha">true</bool>
+    <bool name="config_enableWallpaperService">false</bool>
+    <bool name="config_dreamsSupported">false</bool>
+    <bool name="config_voice_capable">false</bool>
+    <bool name="config_sms_capable">false</bool>
+    <bool name="config_showNavigationBar">true</bool>
+    <bool name="config_allowAllRotations">false</bool>
+    <bool name="config_animateScreenLights">false</bool>
+    <integer name="config_shortAnimTime">0</integer>
+    <integer name="config_mediumAnimTime">0</integer>
+    <integer name="config_longAnimTime">0</integer>
+</resources>

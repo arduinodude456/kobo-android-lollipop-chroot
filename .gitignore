@@ -1,0 +1,7 @@
+build/
+cache/
+dist/
+native/build/
+native/build-*/
+*.pyc
+__pycache__/
