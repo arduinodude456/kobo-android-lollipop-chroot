@@ -161,7 +161,9 @@ COMMON=(--sysroot="$SYSROOT" -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -
 # Lollipop's /sbin/healthd is a STATIC executable: LD_PRELOAD (binder 32->64 bit shim) cannot reach it, so it can
 # never register "batteryproperties" on the Kobo kernel -> BatteryService NPE -> system_server/zygote restart loop.
 # Replace it with a dynamically linked bionic implementation that runs under the shim.
-"$CC" "${COMMON[@]}" "$ROOT/native/kobo_healthd.c" -o "$NATIVE/kobo-healthd"
+# PIE ist Pflicht: der Lollipop-Linker lehnt nicht-PIE-Programme ab ("only position independent executables (PIE)
+# are supported"), das Programm beendet sich dann sofort mit Status 1 ohne eigene Logzeile.
+"$CC" "${COMMON[@]}" -fPIE -pie "$ROOT/native/kobo_healthd.c" -o "$NATIVE/kobo-healthd"
 grep -aF '/system/bin/linker' "$NATIVE/kobo-healthd" >/dev/null || {
     echo 'kobo-healthd is not a dynamic bionic executable' >&2; exit 1
 }

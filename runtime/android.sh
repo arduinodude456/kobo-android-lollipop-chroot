@@ -241,7 +241,7 @@ tmo() {
     tmo_s=$1; shift
     "$@" &
     tmo_p=$!
-    ( nap "$tmo_s"; kill -KILL "$tmo_p" 2>/dev/null ) &
+    ( nap "$tmo_s"; kill -KILL "$tmo_p" 2>/dev/null ) >/dev/null 2>&1 &
     tmo_k=$!
     wait "$tmo_p" 2>/dev/null
     tmo_rc=$?
@@ -333,6 +333,76 @@ patch_init_loglevel() {
         }' "$rc" > "$tmp" || { rm -f "$tmp"; return 0; }
     grep -q 'KOBO_LOGLEVEL_V1' "$tmp" && cat "$tmp" > "$rc"
     rm -f "$tmp"
+}
+# Lollipop-init loest nach "init" nur "late-init" aus. Fehlt dieser Abschnitt in der init.rc, laufen fs, post-fs-data
+# und boot nie: kein einziger Dienst startet, kein servicemanager, kein Bootbild. Idempotent, auch fuer alte Rootfs.
+patch_init_lateinit() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_LATEINIT_V1' "$rc" && return 0
+    grep -Eq '^on[[:space:]]+late-init[[:space:]]*$' "$rc" && return 0
+    {
+        echo ''
+        echo '# KOBO_LATEINIT_V1: Lollipop-init triggert nur late-init; Boot-Kette hier nachziehen.'
+        echo 'on late-init'
+        echo '    trigger early-fs'
+        echo '    trigger fs'
+        echo '    trigger post-fs'
+        echo '    trigger post-fs-data'
+        echo '    trigger early-boot'
+        echo '    trigger boot'
+    } >> "$rc" || fail 'init.rc: late-init-Abschnitt konnte nicht angehaengt werden.'
+    echo "init.rc angepasst (KOBO_LATEINIT_V1)"
+}
+# init.environ.rc laeuft NACH der init.rc und ueberschreibt LD_PRELOAD (libsigchain.so statt Binder-Shim). Dienste
+# (servicemanager, healthd, installd ...) beenden sich dann sofort. Export in "on late-init" nachziehen (idempotent).
+patch_init_preload() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_PRELOAD_V1' "$rc" && return 0
+    grep -q 'export LD_PRELOAD /system/lib/libkobofb.so:libsigchain.so' "$rc" && return 0
+    tmp="$RUN/init.rc.preload"
+    awk '{ print }
+        $1 == "on" && $2 == "late-init" && NF == 2 && !done {
+            print "    # KOBO_PRELOAD_V1: Binder-Shim nach init.environ.rc erneut setzen."
+            print "    export LD_PRELOAD /system/lib/libkobofb.so:libsigchain.so"
+            done = 1
+        }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc: LD_PRELOAD-Patch fehlgeschlagen.'; }
+    grep -q 'KOBO_PRELOAD_V1' "$tmp" || { rm -f "$tmp"; fail 'init.rc: "on late-init" fehlt fuer LD_PRELOAD-Patch.'; }
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_PRELOAD_V1)"
+}
+# installd bricht ohne /data/misc/user ab ("Failed to mkdir(/data/misc/user/0)"); das Stock-init legt es in "on post-fs-data" an.
+# Fehlende Datenverzeichnisse in "on late-init" nachziehen (idempotent, auch fuer alte Rootfs).
+patch_init_datadirs() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_DATADIRS_V1' "$rc" && return 0
+    grep -Eq '^[[:space:]]+mkdir /data/misc/user ' "$rc" && return 0
+    tmp="$RUN/init.rc.datadirs"
+    awk '{ print }
+        $1 == "on" && $2 == "late-init" && NF == 2 && !done {
+            print "    # KOBO_DATADIRS_V1: Verzeichnisse, die installd/system_server voraussetzen."
+            print "    mkdir /data/misc/user 0771 system system"
+            print "    mkdir /data/misc/sms 0770 system radio"
+            print "    mkdir /data/misc/zoneinfo 0775 system system"
+            print "    mkdir /data/user 0711 system system"
+            print "    mkdir /data/media 0770 media_rw media_rw"
+            done = 1
+        }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc: Datenverzeichnis-Patch fehlgeschlagen.'; }
+    grep -q 'KOBO_DATADIRS_V1' "$tmp" || { rm -f "$tmp"; fail 'init.rc: "on late-init" fehlt fuer Datenverzeichnis-Patch.'; }
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_DATADIRS_V1)"
+}
+# Kernel drosselt /dev/kmsg-Schreiber (10 Zeilen/5 s je offener Datei): init-Meldungen gingen verloren.
+devkmsg_unlimit() {
+    f=/proc/sys/kernel/printk_devkmsg
+    [ -w "$f" ] || return 0
+    DEVKMSG_OLD=$(cat "$f" 2>/dev/null)
+    echo on > "$f" 2>/dev/null || true
+}
+devkmsg_restore() {
+    [ -n "${DEVKMSG_OLD:-}" ] && echo "$DEVKMSG_OLD" > /proc/sys/kernel/printk_devkmsg 2>/dev/null || true
 }
 patch_init_rc() {
     # Das stock-init der Emulator-Ramdisk mountet ein frisches tmpfs auf /dev und versteckt damit
@@ -438,6 +508,7 @@ bootwatch() {
         echo "--- ls system/lib/hw:"; ls "$ROOTFS/system/lib/hw" 2>&1 | tr '\n' ' '; echo
         echo "--- libEGL/libGLES*:"; ls -l "$ROOTFS"/system/lib/libEGL.so "$ROOTFS"/system/lib/libGLES* 2>&1
         echo "--- Props:"; grep -E 'ro.hardware|egl|opengl|qemu' "$ROOTFS/system/build.prop" "$ROOTFS/default.prop" 2>&1
+        echo "--- /proc/cmdline (androidboot.mode=charger?):"; cat /proc/cmdline 2>&1
     } > "$BASE/egl.txt" 2>&1
     while [ "$i" -lt 60 ] && kill -0 "$container_pid" 2>/dev/null; do
         nap 10; i=$((i + 1))
@@ -455,6 +526,16 @@ bootwatch() {
             tmo 5 "$ENVB" -i PATH=/system/bin "$CHROOTB" "$ROOTFS" /system/bin/sh -c 'export LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/service check batterypropreg' 2>&1
             echo "--- service check batteryproperties:"
             tmo 5 "$ENVB" -i PATH=/system/bin "$CHROOTB" "$ROOTFS" /system/bin/sh -c 'export LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/service check batteryproperties' 2>&1
+            echo "--- getprop (alle):"
+            tmo 5 "$ENVB" -i PATH=/system/bin "$CHROOTB" "$ROOTFS" /system/bin/getprop 2>&1 | grep -E 'init.svc|ro.bootmode|ro.boot\.|sys.boot|kobo'
+            echo "--- kobo-healthd.log:"; tail -n 40 "$ROOTFS/data/local/tmp/kobo-healthd.log" 2>&1
+            echo "--- kobo-binder.log:"; tail -n 40 "$ROOTFS/data/local/tmp/kobo-binder.log" 2>&1
+            echo "--- rootfs /dev/kmsg:"; tail -n 40 "$ROOTFS/dev/kmsg" 2>&1
+            echo "--- healthd Datei:"; ls -l "$ROOTFS/sbin/healthd" 2>&1
+            echo "--- ELF-Typ /sbin/healthd (Bytes 16-17: 02 00 = nicht PIE -> Lollipop-Linker lehnt ab, 03 00 = PIE):"
+            dd if="$ROOTFS/sbin/healthd" bs=1 skip=16 count=2 2>/dev/null | od -An -tx1
+            echo "--- healthd Probelauf (Linker-Meldung auf stderr):"
+            tmo 2 "$ENVB" -i PATH=/system/bin ANDROID_ROOT=/system ANDROID_DATA=/data "$CHROOTB" "$ROOTFS" /system/bin/sh -c 'export LD_PRELOAD=/system/lib/libkobofb.so; /sbin/healthd; echo "Exit: $?"' 2>&1 | head -n 10
             echo "--- dmesg healthd/init:"
             dmesg 2>/dev/null | grep -iE 'healthd|init: (cannot|could not|untracked|service)|init:.*(healthd|exited|killing)' | tail -n 30
         } > "$BASE/healthd.txt" 2>&1
@@ -524,6 +605,7 @@ cleanup() {
     fi
     mounted "$ROOTFS" && kill_rootfs_procs
     cpu_perf_off
+    devkmsg_restore
     if [ -f "$ROOTFS/dev/kmsg" ]; then
         cat "$ROOTFS/dev/kmsg" >> "$BASE/android-init.log" 2>/dev/null || true
     fi
@@ -731,6 +813,9 @@ run() {
     ENVB="$ENV_BIN"
     start_ime_fix
     patch_init_rc
+    patch_init_lateinit
+    patch_init_preload
+    patch_init_datadirs
     patch_init_loglevel
     patch_init_selinux
     apply_perf_tuning
@@ -806,6 +891,7 @@ run() {
     fi
     ifconfig lo 127.0.0.1 up 2>/dev/null || ip link set lo up
     cpu_perf_on
+    devkmsg_unlimit
     "$BASE/bin/kobo-vnc" --shared "$RUN/shared" --input-dir "$ROOTFS/dev/input" --port 5963 &
     vnc_pid=$!
     echo "$vnc_pid" > "$RUN/vnc.pid"

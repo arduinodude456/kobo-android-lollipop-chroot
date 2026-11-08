@@ -34,6 +34,12 @@ on init
     mkdir /data/system/users 0775 system system
     mkdir /data/system/users/0 0775 system system
     mkdir /data/misc 01771 system misc
+    mkdir /data/misc/user 0771 system system
+    mkdir /data/misc/sms 0770 system radio
+    mkdir /data/misc/zoneinfo 0775 system system
+    mkdir /data/misc/vold 0700 root root
+    mkdir /data/user 0711 system system
+    mkdir /data/media 0770 media_rw media_rw
     mkdir /data/misc/keystore 0700 keystore keystore
     mkdir /data/misc/keychain 0771 system system
     mkdir /data/misc/systemkeys 0700 system system
@@ -64,6 +70,19 @@ on init
     setprop system_init.startsurfaceflinger 0
     setprop debug.sf.nohwcomposer 1
     setprop persist.sys.usb.config none
+
+# Lollipop-init loest nach "init" nur noch "late-init" aus; fs/post-fs-data/boot muessen von hier kommen.
+# Ohne diesen Abschnitt startet kein Dienst (kein servicemanager, kein surfaceflinger, kein Bootbild).
+on late-init
+    # init.environ.rc (wird nach dieser Datei ausgefuehrt) setzt LD_PRELOAD auf libsigchain.so und
+    # ueberschreibt damit die Binder-Shim aus "on init": servicemanager/healthd/installd starben sofort.
+    export LD_PRELOAD /system/lib/libkobofb.so:libsigchain.so
+    trigger early-fs
+    trigger fs
+    trigger post-fs
+    trigger post-fs-data
+    trigger early-boot
+    trigger boot
 
 on fs
     setprop ro.crypto.state unencrypted

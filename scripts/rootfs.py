@@ -37,6 +37,11 @@ def has_interp(path):
     return any(struct.unpack_from('<I', data, offset + size * i)[0] == 3 for i in range(count))
 
 
+def is_pie(path):
+    """True if the ELF32 file is ET_DYN (position independent). Lollipop's linker rejects ET_EXEC programs."""
+    return struct.unpack_from('<H', path.read_bytes(), 16)[0] == 3
+
+
 def validate(stage):
     for name in REQUIRED:
         if not (stage / name).is_file():
@@ -50,6 +55,8 @@ def validate(stage):
     arm_elf(stage / 'sbin/healthd')
     if not has_interp(stage / 'sbin/healthd'):
         raise ValueError('sbin/healthd is static: the binder LD_PRELOAD shim cannot apply; use kobo-healthd')
+    if not is_pie(stage / 'sbin/healthd'):
+        raise ValueError('sbin/healthd is not PIE: the Lollipop linker refuses it; build kobo-healthd with -fPIE -pie')
     initrc = (stage / 'init.rc').read_text()
     if 'service zygote ' not in initrc or 'service surfaceflinger ' not in initrc:
         raise ValueError('dedicated init.rc missing framework services')

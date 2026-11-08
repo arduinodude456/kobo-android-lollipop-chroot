@@ -124,6 +124,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('native/kobo_healthd.c', build)
         self.assertIn('root/sbin/healthd', build)
         self.assertNotIn('-static', build.split('kobo_healthd.c', 1)[1].split('\n', 1)[0])
+        self.assertIn('-fPIE -pie', build.split('kobo_healthd.c', 1)[0].rsplit('\n', 2)[-2] + build.split('kobo_healthd.c', 1)[0].rsplit('\n', 1)[-1])
         rootfs = (ROOT / 'scripts/rootfs.py').read_text()
         self.assertIn("'sbin/healthd'", rootfs)
         self.assertIn('has_interp', rootfs)
