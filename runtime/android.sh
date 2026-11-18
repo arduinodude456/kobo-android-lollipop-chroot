@@ -643,9 +643,17 @@ refresh_rootfs_bootstrap() {
         cp "$BASE/bin/kobo-vold" "$ROOTFS/system/bin/vold" || fail 'kobo-vold konnte nicht aktualisiert werden.'
         chmod 0755 "$ROOTFS/system/bin/vold" || fail 'Rechte für kobo-vold konnten nicht gesetzt werden.'
     fi
+    gles_alias=''
     if [ -f "$BASE/bin/libGLES.so" ]; then
+        gles_alias="$BASE/bin/libGLES.so"
+    elif [ -f "$ROOTFS/system/lib/egl/libGLES_android.so" ]; then
+        # Existing rootfs images already contain the software driver. Reuse it
+        # so this boot fix can be installed without rebuilding the image.
+        gles_alias="$ROOTFS/system/lib/egl/libGLES_android.so"
+    fi
+    if [ -n "$gles_alias" ]; then
         mkdir -p "$ROOTFS/system/lib/egl"
-        cp "$BASE/bin/libGLES.so" "$ROOTFS/system/lib/egl/libGLES.so" || fail 'libGLES.so konnte nicht aktualisiert werden.'
+        cp "$gles_alias" "$ROOTFS/system/lib/egl/libGLES.so" || fail 'libGLES.so konnte nicht aktualisiert werden.'
         chmod 0644 "$ROOTFS/system/lib/egl/libGLES.so" || fail 'Rechte für libGLES.so konnten nicht gesetzt werden.'
     fi
 }

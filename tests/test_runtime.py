@@ -75,6 +75,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('bin/kobo-vold', source)
         self.assertIn('bin/libGLES.so', source)
         self.assertIn('system/lib/egl/libGLES.so', source)
+        self.assertIn('system/lib/egl/libGLES_android.so', source)
 
     def test_container_compiles_strictly(self):
         with tempfile.TemporaryDirectory() as tmp:
