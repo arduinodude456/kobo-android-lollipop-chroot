@@ -643,6 +643,11 @@ refresh_rootfs_bootstrap() {
         cp "$BASE/bin/kobo-vold" "$ROOTFS/system/bin/vold" || fail 'kobo-vold konnte nicht aktualisiert werden.'
         chmod 0755 "$ROOTFS/system/bin/vold" || fail 'Rechte für kobo-vold konnten nicht gesetzt werden.'
     fi
+    if [ -f "$BASE/bin/libGLES.so" ]; then
+        mkdir -p "$ROOTFS/system/lib/egl"
+        cp "$BASE/bin/libGLES.so" "$ROOTFS/system/lib/egl/libGLES.so" || fail 'libGLES.so konnte nicht aktualisiert werden.'
+        chmod 0644 "$ROOTFS/system/lib/egl/libGLES.so" || fail 'Rechte für libGLES.so konnten nicht gesetzt werden.'
+    fi
 }
 # ---- WLAN-Bruecke: Host-WLAN fuer Android sichtbar machen (siehe docs/WLAN.md) ------------------------
 # Android teilt den Netzwerkstack mit dem Kobo. kobo-wpa spiegelt den WLAN-Zustand des Hosts in

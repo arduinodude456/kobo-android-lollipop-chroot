@@ -90,6 +90,7 @@ def package(root, build, product, dist):
     # persistent Android app data.
     copy_file(product / 'system/bin/vold', android / 'bin/kobo-vold', executable=True)
     copy_file(product / 'root/sbin/healthd', android / 'bin/kobo-healthd', executable=True)
+    copy_file(product / 'system/lib/egl/libGLES.so', android / 'bin/libGLES.so')
     copy_file(root / 'android/device/kobo/libra_colour/init.rc', android / 'init.rc')
     # WLAN-Bruecke: android.sh kopiert diese Dateien bei jedem Start ins Rootfs, damit auch ein
     # bestehendes rootfs.img ohne Neuaufbau WLAN bekommt.

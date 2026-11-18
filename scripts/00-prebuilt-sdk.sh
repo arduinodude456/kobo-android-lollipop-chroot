@@ -144,6 +144,10 @@ printf '0 0 android\n' | sudo tee "$PRODUCT/system/lib/egl/egl.cfg" >/dev/null
 # Do not let SurfaceFlinger load emulator-only EGL/GLES shims on Kobo.
 sudo find "$PRODUCT/system/lib" -type f \( -name '*_emulation.so' -o -name 'gralloc.goldfish.so' -o -name 'hwcomposer.goldfish.so' \) -delete
 sudo mkdir -p "$PRODUCT/system/lib/egl"
+# API-21 libEGL does not consistently honor ro.hardware.egl. Keep a
+# property-independent software GLES entry point beside the named driver.
+sudo install -o root -g root -m 0644 "$PRODUCT/system/lib/egl/libGLES_android.so" \
+    "$PRODUCT/system/lib/egl/libGLES.so"
 
 CC="$NDK_DIR/android-ndk-r10e/toolchains/arm-linux-androideabi-4.8/prebuilt/linux-x86_64/bin/arm-linux-androideabi-gcc"
 SYSROOT="$NDK_DIR/android-ndk-r10e/platforms/$NDK_PLATFORM/arch-arm"

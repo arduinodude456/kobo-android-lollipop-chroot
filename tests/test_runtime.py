@@ -73,6 +73,8 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('refresh_rootfs_bootstrap\n    install_bundled_apps', source)
         self.assertIn('bin/kobo-healthd', source)
         self.assertIn('bin/kobo-vold', source)
+        self.assertIn('bin/libGLES.so', source)
+        self.assertIn('system/lib/egl/libGLES.so', source)
 
     def test_container_compiles_strictly(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -61,6 +61,12 @@ on init
     chmod 0666 /dev/ashmem
     chmod 0666 /dev/alarm
     setprop ro.hardware kobo_libra_colour
+    # API-21 libEGL only selects the software GLES loader reliably in QEMU mode.
+    # The matching libGLES.so alias is also shipped for property-independent lookup.
+    setprop ro.kernel.qemu 1
+    setprop ro.kernel.qemu.gles 0
+    setprop ro.hardware.egl android
+    setprop debug.egl.hw 0
     setprop ro.bootmode unknown
     setprop ro.factorytest 0
     setprop ro.crypto.state unencrypted

@@ -134,6 +134,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('batterypropreg', healthd_source)
         self.assertIn('install -d -o root -g root -m 0755 "$PRODUCT/root/sbin"', build)
         self.assertIn('rm -rf -- "$PRODUCT/root/sbin/healthd"', build)
+        self.assertIn('system/lib/egl/libGLES_android.so', build)
+        self.assertIn('system/lib/egl/libGLES.so', rootfs)
 
     def test_lollipop_init_replays_qemu_boot_triggers(self):
         initrc = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
@@ -153,6 +155,9 @@ class WorkflowTests(unittest.TestCase):
         vold = initrc.split('service vold /system/bin/vold', 1)[1].split('\nservice ', 1)[0]
         self.assertIn('class core', vold)
         self.assertIn('socket vold stream 0660 root mount', vold)
+        self.assertIn('setprop ro.kernel.qemu 1', initrc)
+        self.assertIn('setprop ro.kernel.qemu.gles 0', initrc)
+        self.assertIn('setprop debug.egl.hw 0', initrc)
         self.assertNotIn('vold.decrypt trigger_restart_framework', initrc)
         self.assertIn('android-lollipop_api21', (ROOT / 'scripts/rootfs.py').read_text())
 
@@ -227,6 +232,9 @@ class PackageTests(unittest.TestCase):
         healthd = self.product / 'root/sbin/healthd'
         healthd.parent.mkdir(parents=True, exist_ok=True)
         healthd.write_bytes(fixture_elf(dynamic=True))
+        gles = self.product / 'system/lib/egl/libGLES.so'
+        gles.parent.mkdir(parents=True, exist_ok=True)
+        gles.write_bytes(fixture_elf())
         notice = self.product / 'system/etc/NOTICE.html.gz'
         notice.parent.mkdir(parents=True, exist_ok=True)
         notice.write_bytes(gzip.compress(b'fixture notice'))
@@ -244,7 +252,8 @@ class PackageTests(unittest.TestCase):
             names = tar.getnames()
             for name in ('.adds/android/rootfs.img.gz', '.adds/android/bin/kobo-vnc',
                          '.adds/android/bin/kobo-container', '.adds/android/bin/kobo-vold',
-                         '.adds/android/bin/kobo-healthd', '.adds/android/init.rc',
+                         '.adds/android/bin/kobo-healthd', '.adds/android/bin/libGLES.so',
+                         '.adds/android/init.rc',
                          '.adds/android/lua/appdock_android.lua',
                          '.adds/koreader/plugins/android.koplugin/main.lua', 'manifest.json', 'SHA256SUMS'):
                 self.assertIn(name, names)
