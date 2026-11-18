@@ -178,8 +178,11 @@ sudo install -o root -g root -m 0755 "$NATIVE/kobo-vnc" "$PRODUCT/system/bin/kob
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-container" "$PRODUCT/system/bin/kobo-container"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-wpa" "$PRODUCT/system/bin/kobo-wpa"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-vold" "$PRODUCT/system/bin/vold"
-sudo mkdir -p "$PRODUCT/root/sbin"
-sudo rm -f "$PRODUCT/root/sbin/healthd"
+# The extracted ramdisk can preserve restrictive directory/file modes.  Make
+# the generated destination explicit before replacing stock healthd; otherwise
+# GitHub-hosted builds may fail with EACCES even though the install runs as root.
+sudo install -d -o root -g root -m 0755 "$PRODUCT/root/sbin"
+sudo rm -rf -- "$PRODUCT/root/sbin/healthd"
 sudo install -o root -g root -m 0755 "$NATIVE/kobo-healthd" "$PRODUCT/root/sbin/healthd"
 
 cat > "$BUILD/source-manifest.xml" <<'EOF'

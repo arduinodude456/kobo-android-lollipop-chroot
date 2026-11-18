@@ -132,6 +132,8 @@ class WorkflowTests(unittest.TestCase):
         healthd_source = (ROOT / 'native/kobo_healthd.c').read_text()
         self.assertIn('add_service("batteryproperties")', healthd_source)
         self.assertNotIn('batterypropreg', healthd_source)
+        self.assertIn('install -d -o root -g root -m 0755 "$PRODUCT/root/sbin"', build)
+        self.assertIn('rm -rf -- "$PRODUCT/root/sbin/healthd"', build)
 
     def test_lollipop_init_replays_qemu_boot_triggers(self):
         initrc = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
