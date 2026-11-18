@@ -26,11 +26,13 @@ Der aktuelle Satz Kobo-Logs stammt laut Rootfs-Marker von API 21 und kann die Lo
 
 Hosttests starten Android nicht und beweisen keinen Geräteboot. Kein Firmware- oder Kernelimage wird geschrieben. Die zusätzlichen Init-Mounts liegen unter dem Android-Rootfs, sollten aber wegen des auf älteren Kobo-Kerneln verwendeten, weniger isolierten Chroot-Fallbacks auf dem Zielgerät kontrolliert geprüft werden.
 
-## Ursache der verbleibenden NPE (BatteryService.java:167) – gefunden
-Lollipop 5.0.x ruft in `BatteryService.<init>` `ServiceManager.getService("batterypropreg")` auf (verifiziert gegen android-5.0.2_r2). `kobo-healthd` registrierte nur `"batteryproperties"` (Name ab Android 5). `service check batteryproperties` meldete deshalb „found“, das Framework bekam aber `null` → NPE bei `registerListener`. Fix: `kobo-healthd` registriert jetzt beide Namen. Noch nicht auf Gerät verifiziert.
+## Korrektur: tatsächlicher API-21-Vertrag
+Der API-21-Quellstand `android-5.0.2_r1` verwendet in `BatteryService.onStart()` ausschließlich `ServiceManager.getService("batteryproperties")`. `kobo-healthd` registriert deshalb genau diesen Dienstnamen; ein zusätzlicher, erfundener `batterypropreg`-Dienst ist entfernt.
 
-## Ursache von „Power off / Shutting down…“ direkt nach dem Boot – gefunden
-`BatteryProperties` hat in Lollipop 5.0.2 und 5.0.2 zwei Felder mehr als zuvor angenommen: nach `batteryVoltage` folgen `batteryCurrentNow` und `batteryChargeCounter`, erst dann `batteryTemperature` (verifiziert gegen android-5.0.2_r1 und android-5.0.2_r2). `kobo-healthd` ließ sie aus. Android las dadurch als Temperatur die Zeichen „Li“ des Technologie-Strings (0x0069004C = 6881356) und löste in `BatteryService.shutdownIfOverTempLocked` `ACTION_REQUEST_SHUTDOWN` (`confirm=false`) aus. Fix: beide Felder mit 0 senden; Host-Test prüft die Reihenfolge. Noch nicht auf Gerät verifiziert.
+Das `BatteryProperties`-Parcel in API 21 enthält nach `batteryVoltage` unmittelbar `batteryTemperature` und anschließend den String `batteryTechnology`. `batteryCurrentNow` und `batteryChargeCounter` gehören nicht zu diesem API-21-Parcel. Der Ersatzdienst sendet nun exakt dieses Layout, das auch der Host-Test absichert.
+
+## Ursache eines hängenden Framework-Starts – behoben
+Der Paketbau ersetzte zwar `/system/bin/vold` durch `kobo-vold`, die zugehörige `init.rc`-Service-Deklaration fehlte jedoch. Dadurch existierte `/dev/socket/vold` nicht und `MountService` konnte beim Start des SystemServer warten. `vold` ist jetzt ein `core`-Dienst mit dem API-21-kompatiblen Socket `vold stream 0660 root mount`.
 
 ## Touch reagierte nicht – Ursache (Lua-Overlay)
 `input.txt` zeigte: Android erkennt das Touchgerät korrekt (touchScreen, Viewport 600x800), aber `getevent -p` meldete `KEY 014a*` – `BTN_TOUCH` war dauerhaft **gedrückt**. Der Lua-Code ließ den Zeiger nur bei den Gesten `release`/`pan_release` los; ein normaler Fingertipp liefert in KOReader aber `touch` → `tap` (keine rohe `release`-Geste). Die „tap“-Verzweigung war durch `now-last_touch>0.6` gesperrt. Folge: Android sah einen Dauer-Druck ohne Loslassen. Fix: `pointer_action()` – `tap`, `swipe`, `hold_release`, `double_tap`, `release`, `pan_release` lösen den Zeiger; zusätzlich ein 6-s-Watchdog als Sicherheitsnetz. Noch nicht auf Gerät verifiziert.

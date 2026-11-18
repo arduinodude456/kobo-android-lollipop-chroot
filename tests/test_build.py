@@ -129,6 +129,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("'sbin/healthd'", rootfs)
         self.assertIn('has_interp', rootfs)
         self.assertIn('kobo_healthd', (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text())
+        healthd_source = (ROOT / 'native/kobo_healthd.c').read_text()
+        self.assertIn('add_service("batteryproperties")', healthd_source)
+        self.assertNotIn('batterypropreg', healthd_source)
 
     def test_lollipop_init_replays_qemu_boot_triggers(self):
         initrc = (ROOT / 'android/device/kobo/libra_colour/init.rc').read_text()
@@ -145,6 +148,9 @@ class WorkflowTests(unittest.TestCase):
         healthd = initrc.split('service healthd /sbin/healthd', 1)[1].split('\nservice ', 1)[0]
         self.assertIn('class core', healthd)
         self.assertNotIn('disabled', healthd)
+        vold = initrc.split('service vold /system/bin/vold', 1)[1].split('\nservice ', 1)[0]
+        self.assertIn('class core', vold)
+        self.assertIn('socket vold stream 0660 root mount', vold)
         self.assertNotIn('vold.decrypt trigger_restart_framework', initrc)
         self.assertIn('android-lollipop_api21', (ROOT / 'scripts/rootfs.py').read_text())
 
@@ -212,10 +218,13 @@ class PackageTests(unittest.TestCase):
         (self.build / 'rootfs.img.gz').write_bytes(compressed)
         (self.build / 'rootfs.img.gz.sha256').write_text(hashlib.sha256(compressed).hexdigest() + '  rootfs.img.gz\n')
         (self.build / 'rootfs.size').write_text(str(768 * 1024 * 1024) + '\n')
-        for name in ('kobo-vnc', 'kobo-container'):
+        for name in ('kobo-vnc', 'kobo-container', 'vold'):
             binary = self.product / 'system/bin' / name
             binary.parent.mkdir(parents=True, exist_ok=True)
             binary.write_bytes(fixture_elf())
+        healthd = self.product / 'root/sbin/healthd'
+        healthd.parent.mkdir(parents=True, exist_ok=True)
+        healthd.write_bytes(fixture_elf(dynamic=True))
         notice = self.product / 'system/etc/NOTICE.html.gz'
         notice.parent.mkdir(parents=True, exist_ok=True)
         notice.write_bytes(gzip.compress(b'fixture notice'))
@@ -232,7 +241,9 @@ class PackageTests(unittest.TestCase):
         with tarfile.open(archive) as tar:
             names = tar.getnames()
             for name in ('.adds/android/rootfs.img.gz', '.adds/android/bin/kobo-vnc',
-                         '.adds/android/bin/kobo-container', '.adds/android/lua/appdock_android.lua',
+                         '.adds/android/bin/kobo-container', '.adds/android/bin/kobo-vold',
+                         '.adds/android/bin/kobo-healthd', '.adds/android/init.rc',
+                         '.adds/android/lua/appdock_android.lua',
                          '.adds/koreader/plugins/android.koplugin/main.lua', 'manifest.json', 'SHA256SUMS'):
                 self.assertIn(name, names)
             info = tar.getmember('.adds/android/bin/kobo-vnc')

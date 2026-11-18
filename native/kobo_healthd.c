@@ -68,8 +68,9 @@ size_t kh_build_props(struct kh_buf *b)
     kh_i32(b, 1);                 /* present */
     kh_i32(b, 100);               /* Level */
     kh_i32(b, 4200);              /* mV */
-    kh_i32(b, 0);                 /* batteryCurrentNow (Lollipop 5.0.x: Pflichtfeld vor Temperatur!) */
-    kh_i32(b, 0);                 /* batteryChargeCounter (ebenso) */
+    /* API 21's BatteryProperties parcel ends here with temperature, followed
+     * immediately by the String16 technology.  Current/charge-counter fields
+     * belong to a later API and would shift the following values. */
     kh_i32(b, 250);               /* 0.1 Grad C */
     kh_str16(b, "Li-ion");
     return b->len;
@@ -244,21 +245,15 @@ int main(void)
     if (ioctl(fd, (int)KB_VERSION, &ver) < 0 || ver != KB_PROTOCOL_USER) { klog("binder version %d (erwartet %d): LD_PRELOAD fehlt?", (int)ver, (int)KB_PROTOCOL_USER); return 1; }
     map = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) { logmsg("mmap failed"); return 1; }
-    /* Lollipop (5.0.x) BatteryService sucht "batterypropreg"; "batteryproperties" gilt erst ab Android 5.
-     * Beide Namen auf denselben Knoten registrieren. */
-    {
-        static const char *const names[2] = { "batterypropreg", "batteryproperties" };
-        int i;
-        for (i = 0; i < 2; i++) {
-            for (tries = 0; tries < 600; tries++) {   /* servicemanager darf spaeter starten */
-                if (add_service(names[i]) == 0) break;
-                klog("addService attempt %d failed (%d)", tries + 1, 0);
-                { struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL); }
-            }
-            if (tries >= 600) { logmsg("addService failed"); return 1; }
-        }
+    /* Android 5.0.2's BatteryService obtains exactly this name before it
+     * registers its listener. */
+    for (tries = 0; tries < 600; tries++) {   /* servicemanager darf spaeter starten */
+        if (add_service("batteryproperties") == 0) break;
+        klog("addService attempt %d failed (%d)", tries + 1, 0);
+        { struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL); }
     }
-    logmsg("batterypropreg + batteryproperties registered");
+    if (tries >= 600) { logmsg("addService failed"); return 1; }
+    logmsg("batteryproperties registered");
     /* init.rc startet class main (zygote, surfaceflinger, ...) erst jetzt: system_server braucht den Dienst sofort. */
     if (system("/system/bin/setprop kobo.healthd.ready 1") != 0) logmsg("setprop kobo.healthd.ready failed");
     serve();

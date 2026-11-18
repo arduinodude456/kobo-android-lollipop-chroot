@@ -56,6 +56,10 @@ Die Android-Daten liegen im ext4-Image. Vor einem Update `sh android.sh stop` au
 
 Das Hauptlog ist `/mnt/onboard/.adds/android/android.log`. Ein erfolgreicher `check` ist nur eine Kernel-Vorprüfung. Ein Fehler bei Binder, Ashmem, `uinput`, ext4 oder Loop ist ein echter Blocker, kein fehlendes Lua-Modul. Fehlen PID-/Mount-Namespaces, verwendet der Starter standardmäßig einen ausdrücklich weniger isolierten Chroot-Fallback; das Log weist darauf hin. Das Projekt lädt keine passenden Treiber nach und ersetzt keinen Kobo-Kernel. Ein Fake-Framebuffer löst diese fehlenden Voraussetzungen nicht.
 
+## Aktualisierung eines vorhandenen Lollipop-Rootfs
+
+Ein aktuelles Installationspaket kopiert vor dem Android-Start seine bootkritischen Dateien (`init.rc`, `kobo-healthd`, `kobo-vold`) in ein bereits vorhandenes `rootfs.img`. Dadurch beheben Aktualisierungen der Android-Init- und Framework-Startkette eine Bootschleife, ohne `/data` oder installierte Apps zu löschen. Das Paket vollständig nach `.adds/android` kopieren und Android danach regulär mit `sh android.sh start` starten; den Kopiervorgang nicht unterbrechen. Alte Pakete enthalten diese Aktualisierungsdateien nicht und verlangen weiterhin einen Neuaufbau des Images.
+
 `config` enthält nur die vertrauenswürdigen Shell-Einstellungen für bereits vorhandene Binder-/Ashmem-Gerätepfade. Nicht einfach Nodes mit geratenen Major-/Minor-Nummern erzeugen. Auch ein vorhandener Binder-Node kann eine unpassende ABI haben. Die Gerätekonfiguration kann je nach Kobo-Firmware unterschiedlich sein.
 
 Weitere Diagnose:

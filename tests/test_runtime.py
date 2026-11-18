@@ -67,6 +67,13 @@ class RuntimeTests(unittest.TestCase):
         source = (ROOT / 'runtime/android.sh').read_text()
         self.assertIn('grep -qw devpts /proc/filesystems', source)
 
+    def test_existing_rootfs_gets_bootstrap_fixes_before_init(self):
+        source = (ROOT / 'runtime/android.sh').read_text()
+        self.assertIn('refresh_rootfs_bootstrap()', source)
+        self.assertIn('refresh_rootfs_bootstrap\n    install_bundled_apps', source)
+        self.assertIn('bin/kobo-healthd', source)
+        self.assertIn('bin/kobo-vold', source)
+
     def test_container_compiles_strictly(self):
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(['gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',

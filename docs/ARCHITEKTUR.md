@@ -48,6 +48,6 @@ Beim regulären Beenden werden wichtige Android-Schreiber gestoppt und Dateisyst
 ## References
 
 [1]: https://www.mobileread.com/forums/showthread.php?t=363175 "Kobo Libra Colour is using Secure Boot – technische Boot-Logs und Diskussion"
-[2]: https://android.googlesource.com/platform/hardware/libhardware/+/android-5.0.2_r2/modules/gralloc/framebuffer.cpp "AOSP Lollipop: generischer Framebuffer-Gralloc-Treiber"
-[3]: https://android.googlesource.com/platform/system/core/+/android-5.0.2_r2/init/init.c "AOSP Lollipop: init und Property-Infrastruktur"
+[2]: https://android.googlesource.com/platform/hardware/libhardware/+/android-5.0.2_r1/modules/gralloc/framebuffer.cpp "AOSP Lollipop: generischer Framebuffer-Gralloc-Treiber"
+[3]: https://android.googlesource.com/platform/system/core/+/android-5.0.2_r1/init/init.c "AOSP Lollipop: init und Property-Infrastruktur"
 [4]: https://source.android.com/docs/core/architecture/ipc/binder-overview "AOSP: Binder-Architektur und Kernel-Treiber"

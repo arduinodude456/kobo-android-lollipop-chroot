@@ -56,7 +56,7 @@ Touch ist Single-Touch über `EV_ABS`, `ABS_X/Y`, `BTN_TOUCH` und `INPUT_PROP_DI
 
 Die Lollipop-Header wurden gezielt geprüft: [fcntl.h] enthält Fortify-Inlines; der Interposer deaktiviert `_FORTIFY_SOURCE` vor den Includes. [ioctl.h] verwendet `int` für den Request und wird über `__BIONIC__` berücksichtigt. [syscall.h] enthält die benötigten `SYS_*`-Aliase. [uinput.h] enthält die Legacy-API, aber kein `UI_SET_PROPBIT`; der Code ergänzt die fehlende Konstante sowie `INPUT_PROP_DIRECT`. Es werden weder `accept4` noch stat-Zeit64-Felder oder libatomic benötigt. Diese Headerprüfung ist **kein ARM32-Bionic-Compiler-/Linkertest**. Der gepinnte API-21-NDK-Build und ein Gerätetest bleiben erforderlich.
 
-[fcntl.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r2/libc/include/fcntl.h
-[ioctl.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r2/libc/include/sys/ioctl.h
-[syscall.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r2/libc/include/sys/syscall.h
+[fcntl.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/include/fcntl.h
+[ioctl.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/include/sys/ioctl.h
+[syscall.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/include/sys/syscall.h
 [uinput.h]: https://android.googlesource.com/platform/bionic/+/android-5.0.2_r1/libc/kernel/common/linux/uinput.h

@@ -522,8 +522,6 @@ bootwatch() {
             echo "init.svc.healthd=$(gp init.svc.healthd)"
             echo "--- ps (Android-Prozesse):"
             ls -l /proc/[0-9]*/root 2>/dev/null | awk -v r="$ROOTFS" '$NF == r { split($(NF-2), a, "/"); print a[3] }' | while read -r apid; do echo "$apid $(cat "/proc/$apid/comm" 2>/dev/null)"; done
-            echo "--- service check batterypropreg (Lollipop-Name):"
-            tmo 5 "$ENVB" -i PATH=/system/bin "$CHROOTB" "$ROOTFS" /system/bin/sh -c 'export LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/service check batterypropreg' 2>&1
             echo "--- service check batteryproperties:"
             tmo 5 "$ENVB" -i PATH=/system/bin "$CHROOTB" "$ROOTFS" /system/bin/sh -c 'export LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/service check batteryproperties' 2>&1
             echo "--- getprop (alle):"
@@ -626,6 +624,25 @@ install_bundled_apps() {
         chmod 0644 "$target"
         echo "Bundled APK installiert: $(basename "$apk")"
     done
+}
+# Keep the bootstrap components in an already-created rootfs current when a
+# newer .adds/android directory is installed.  These files run before Android
+# can update itself, so leaving them only in rootfs.img would force users to
+# erase /data for a boot-loop fix.  Each source file is optional to retain
+# compatibility with older installation packages.
+refresh_rootfs_bootstrap() {
+    if [ -f "$BASE/init.rc" ]; then
+        cp "$BASE/init.rc" "$ROOTFS/init.rc" || fail 'init.rc konnte nicht aktualisiert werden.'
+        chmod 0644 "$ROOTFS/init.rc" || fail 'Rechte für init.rc konnten nicht gesetzt werden.'
+    fi
+    if [ -f "$BASE/bin/kobo-healthd" ]; then
+        cp "$BASE/bin/kobo-healthd" "$ROOTFS/sbin/healthd" || fail 'kobo-healthd konnte nicht aktualisiert werden.'
+        chmod 0755 "$ROOTFS/sbin/healthd" || fail 'Rechte für kobo-healthd konnten nicht gesetzt werden.'
+    fi
+    if [ -f "$BASE/bin/kobo-vold" ]; then
+        cp "$BASE/bin/kobo-vold" "$ROOTFS/system/bin/vold" || fail 'kobo-vold konnte nicht aktualisiert werden.'
+        chmod 0755 "$ROOTFS/system/bin/vold" || fail 'Rechte für kobo-vold konnten nicht gesetzt werden.'
+    fi
 }
 # ---- WLAN-Bruecke: Host-WLAN fuer Android sichtbar machen (siehe docs/WLAN.md) ------------------------
 # Android teilt den Netzwerkstack mit dem Kobo. kobo-wpa spiegelt den WLAN-Zustand des Hosts in
@@ -807,6 +824,7 @@ run() {
     mounted "$ROOTFS" && fail 'Rootfs ist bereits gemountet.'
     rootfs_mount
     [ -f "$ROOTFS/kobo-chroot" ] && [ "$(cat "$ROOTFS/kobo-chroot")" = 'android-lollipop_api21' ] || fail 'Falsches Rootfs: Lollipop/API-21-Image erforderlich. Altes rootfs.img sichern, entfernen und neu installieren.'
+    refresh_rootfs_bootstrap
     install_bundled_apps
     CHROOT_BIN=$(command -v chroot) || fail 'chroot nicht gefunden.'
     ENV_BIN=$(command -v env) || fail 'env nicht gefunden.'

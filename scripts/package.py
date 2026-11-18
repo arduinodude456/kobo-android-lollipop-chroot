@@ -57,8 +57,9 @@ def package(root, build, product, dist):
     if len(expected) != 2 or expected[1] != 'rootfs.img.gz' or expected[0] != sha256(build / 'rootfs.img.gz'):
         raise ValueError('rootfs image checksum mismatch')
     validate_compressed_image(build / 'rootfs.img.gz', size)
-    for helper in ('kobo-vnc', 'kobo-container'):
+    for helper in ('kobo-vnc', 'kobo-container', 'vold'):
         arm_elf(require(product / 'system/bin' / helper), static=True)
+    arm_elf(require(product / 'root/sbin/healthd'))
     required_runtime = ('android.sh', 'install.sh', 'config')
     for name in required_runtime:
         require(root / 'runtime' / name)
@@ -84,6 +85,12 @@ def package(root, build, product, dist):
         copy_file(ime_fix, android / 'ime-fix.sh', executable=True)
     for helper in ('kobo-vnc', 'kobo-container'):
         copy_file(product / 'system/bin' / helper, android / 'bin' / helper, executable=True)
+    # These three files are refreshed into an existing rootfs by android.sh
+    # before init starts.  That permits a boot-critical fix without deleting
+    # persistent Android app data.
+    copy_file(product / 'system/bin/vold', android / 'bin/kobo-vold', executable=True)
+    copy_file(product / 'root/sbin/healthd', android / 'bin/kobo-healthd', executable=True)
+    copy_file(root / 'android/device/kobo/libra_colour/init.rc', android / 'init.rc')
     # WLAN-Bruecke: android.sh kopiert diese Dateien bei jedem Start ins Rootfs, damit auch ein
     # bestehendes rootfs.img ohne Neuaufbau WLAN bekommt.
     wpa = product / 'system/bin/kobo-wpa'
