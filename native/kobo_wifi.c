@@ -516,6 +516,48 @@ static int kw_bind_ctrl(const char *dir, const char *name, char *path, size_t ca
     return sock;
 }
 
+
+/* KOBO_WIFIWATCH_V1: Bindet genau diesen Pfad (neu). Rueckgabe: Socket oder -1. */
+static int kw_bind_path(const char *path)
+{
+    struct sockaddr_un a;
+    int sock;
+    if (strlen(path) >= sizeof a.sun_path) return -1;
+    unlink(path);
+    sock = kw_socket(AF_UNIX, SOCK_DGRAM);
+    if (sock < 0) return -1;
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    memcpy(a.sun_path, path, strlen(path));
+    if (bind(sock, (struct sockaddr *)&a, sizeof a) < 0) {
+        kw_log("Neubindung %s: %s", path, strerror(errno));
+        close(sock);
+        return -1;
+    }
+    if (chown(path, KW_AID_WIFI, KW_AID_WIFI) < 0) { /* nur als root moeglich */ }
+    chmod(path, 0666);
+    return sock;
+}
+
+/* KOBO_WIFIWATCH_V1: Wenn jemand die Socket-Datei geloescht oder ersetzt hat (Android-Aufraeumen, Neustart des
+ * Frameworks), bindet die Attrappe sie neu. Sonst bleibt WifiMonitor bei "Unable to open connection to
+ * supplicant ... No such file or directory" und WLAN dauerhaft auf "Wird eingeschaltet...". */
+static void kw_watch_sockets(struct kw *w)
+{
+    int si;
+    for (si = 0; si < w->nsock; si++) {
+        struct stat st;
+        int ok = (stat(w->paths[si], &st) == 0 && S_ISSOCK(st.st_mode));
+        int ns;
+        if (ok) { if ((st.st_mode & 0666) != 0666) chmod(w->paths[si], 0666); continue; }
+        ns = kw_bind_path(w->paths[si]);
+        if (ns < 0) continue;
+        close(w->socks[si]);
+        w->socks[si] = ns;
+        kw_log("Socket neu angelegt: %s", w->paths[si]);
+    }
+}
+
 static int kw_supplicant(const char *iface)
 {
     struct kw *w = calloc(1, sizeof *w);
@@ -526,6 +568,7 @@ static int kw_supplicant(const char *iface)
     unsigned ticks = 0;
 
     if (!w) return 1;
+    if (!getenv("KOBO_WPA_LOG")) kw_mkdirs("/data/local/tmp");
     snprintf(w->iface, sizeof w->iface, "%s", iface);
     snprintf(w->dir, sizeof w->dir, "%s", kw_dir());
     snprintf(w->envfile, sizeof w->envfile, "%s", kw_envfile());
@@ -594,6 +637,7 @@ static int kw_supplicant(const char *iface)
         if (t >= next_tick) {
             next_tick = t + 1000;
             kw_refresh(w, (++ticks % 5) == 0);
+            kw_watch_sockets(w);
         }
         kw_run_events(w);
     }

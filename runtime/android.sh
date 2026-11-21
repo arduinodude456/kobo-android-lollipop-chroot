@@ -1319,6 +1319,33 @@ net_open_perms() {
     done
     return 0
 }
+# KOBO_WIFIHEAL_V1: Bleibt WifiStateMachine nach dem Boot in SupplicantStartingState ("Wi-Fi is enabling"), weil der
+# erste Verbindungsversuch zum Supplicant-Socket scheiterte, kommt Android von allein nie wieder heraus (das Starten
+# mit "svc" scheitert zusaetzlich am ART-Heap). Dann wird das Framework (zygote/system_server) EINMAL neu gestartet:
+# WifiService startet frisch mit eingeschaltetem WLAN, die Supplicant-Attrappe laeuft laengst.
+wifi_stuck() {
+    d=$(android_run /system/bin/dumpsys wifi 2>/dev/null | head -n 400)
+    case "$d" in *"Wi-Fi is enabled"*) return 1 ;; esac
+    case "$d" in *"curState=SupplicantStartingState"*|*"Wi-Fi is enabling"*) return 0 ;; esac
+    return 1
+}
+wifi_heal() {
+    n=0
+    while [ "$n" -lt 4 ] && kill -0 "$container_pid" 2>/dev/null; do
+        wifi_stuck || { echo "=== $(date +%T) WLAN-Zustand ok (kein Neustart noetig)" >> "$BASE/net.log"; return 0; }
+        n=$((n + 1)); nap 10
+    done
+    kill -0 "$container_pid" 2>/dev/null || return 0
+    echo "=== $(date +%T) WLAN haengt in SupplicantStartingState -> Framework-Neustart (einmalig)" >> "$BASE/net.log"
+    net_open_perms
+    android_run /system/bin/setprop ctl.restart zygote >> "$BASE/net.log" 2>&1
+    echo "rc=$?" >> "$BASE/net.log"
+    nap 60
+    net_open_perms
+    if wifi_stuck; then echo "=== $(date +%T) nach Neustart: WLAN haengt weiter" >> "$BASE/net.log"
+    else echo "=== $(date +%T) nach Neustart: WLAN-Zustand ok" >> "$BASE/net.log"; fi
+    return 0
+}
 netboot() {
     set +e
     : > "$BASE/net.log"
@@ -1330,7 +1357,7 @@ netboot() {
     nap 10
     # Android-Einstellungen: WLAN an, Installation aus fremden Quellen erlauben (APK aus dem Browser).
     t=0
-    while [ "$t" -lt 4 ] && kill -0 "$container_pid" 2>/dev/null; do
+    while [ "$t" -lt 2 ] && kill -0 "$container_pid" 2>/dev/null; do
         net_open_perms
         echo "=== $(date +%T) svc wifi enable (Versuch $t)" >> "$BASE/net.log"
         android_run /system/bin/svc wifi enable >> "$BASE/net.log" 2>&1
@@ -1345,6 +1372,7 @@ netboot() {
     android_run /system/bin/settings put secure install_non_market_apps 1 >> "$BASE/net.log" 2>&1
     echo "rc=$?" >> "$BASE/net.log"
         grep -E 'F/|Abort message|Check failed|art/runtime|VM exiting|FATAL' "$ROOTFS/data/local/tmp/android.log" 2>/dev/null | tail -n 12 | cut -c1-240 >> "$BASE/net.log"
+    wifi_heal
     nap 25
     {
         echo "=== $(date +%T) Host:"; "$BASE/bin/kobo-wpa" --ipinfo "$iface" 2>&1

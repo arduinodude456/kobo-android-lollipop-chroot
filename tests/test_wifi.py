@@ -138,6 +138,30 @@ class WifiBridge(unittest.TestCase):
             finally:
                 if p.poll() is None: p.kill()
 
+    def test_deleted_socket_is_recreated(self):
+        """KOBO_WIFIWATCH_V1: Wird die Socket-Datei geloescht, legt die Attrappe sie neu an und antwortet wieder."""
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            p = subprocess.Popen([str(self.exe), "--supplicant", "lo"], env=self.env(d))
+            try:
+                sock = d / "sock" / "lo"
+                for _ in range(50):
+                    if sock.exists(): break
+                    time.sleep(0.1)
+                self.assertTrue(sock.exists())
+                os.unlink(sock)
+                for _ in range(60):
+                    if sock.exists(): break
+                    time.sleep(0.1)
+                self.assertTrue(sock.exists(), "Socket wurde nicht neu angelegt")
+                c = self.client(d, "again")
+                self.assertEqual(self.ask(c, "PING"), "PONG\n")
+                self.assertEqual(self.ask(c, "TERMINATE"), "OK\n")
+                c.close()
+                self.assertEqual(p.wait(timeout=5), 0)
+            finally:
+                if p.poll() is None: p.kill()
+
     @unittest.skipUnless(os.geteuid() == 0, "--probe senkt Rechte auf uid 1000, braucht root")
     def test_probe_selftest(self):
         with tempfile.TemporaryDirectory() as t:
@@ -220,7 +244,7 @@ class RuntimeIntegration(unittest.TestCase):
     def test_android_sh_wires_bridge(self):
         s = (ROOT / "runtime/android.sh").read_text()
         for needle in ("patch_net_rc", "KOBO_NET_BEGIN", "svc wifi enable", "install_non_market_apps", "netinfo",
-                       "data/system/wpa_supplicant", "kobo-wpa --probe"):
+                       "data/system/wpa_supplicant", "kobo-wpa --probe", "KOBO_WIFIHEAL_V1", "wifi_heal"):
             self.assertIn(needle, s)
         subprocess.run(["sh", "-n", str(ROOT / "runtime/android.sh")], check=True)
 

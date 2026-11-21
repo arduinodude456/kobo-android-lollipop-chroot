@@ -31,3 +31,18 @@ sh android.sh netinfo        # Host-Daten + Android-Seite (net.txt)
 Dateien in `.adds/android/`: `net.log` (svc/settings), `net.txt` (Properties, `dumpsys connectivity/wifi`, Logs), und im Rootfs `data/local/tmp/kobo-wpa.log` (alle Supplicant-Kommandos) sowie `kobo-net-guard.log` (blockierte Host-Änderungen).
 `net.txt` enthält außerdem `kobo-wpa --probe` (öffnet den Socket wie system_server als uid 1000 und nennt je Pfad den genauen Fehler), `ls -ln` der Socket-Ordner, die WLAN-Zeilen aus `android.log` und `dumpsys wifi`.
 Typische Befunde: `init.svc.wpa_supplicant` nicht `running` → WLAN in Android nicht eingeschaltet oder `kobo-wpa` fehlt; `dhcp.<iface>.result` leer → Host-WLAN nicht verbunden; `net.dns1` leer → keine `nameserver` in `/etc/resolv.conf` des Kobo.
+
+## Selbstheilung und Diagnose (WLAN haengt bei "Wird eingeschaltet...")
+
+Symptom im Log: `WifiHW: Unable to open connection to supplicant on "@android:wpa_wlan0"`, danach `startMonitoring(wlan0) failed!`
+und in `dumpsys wifi` bleibt `WifiStateMachine` in `SupplicantStartingState`. Android kommt von allein nicht mehr heraus.
+Gegenmassnahmen (alle automatisch):
+
+- **Socket-Waechter** (`kobo-wpa`): Jede Sekunde wird geprueft, ob `/dev/socket/wpa_<iface>`, `/dev/socket/<iface>` und
+  `/data/misc/wifi/sockets/<iface>` noch existieren und Sockets sind; fehlt einer, wird er neu gebunden (`Socket neu angelegt` im `kobo-wpa.log`).
+- **connect()-Fallback** (`libkobofb.so`, `kobo_net.c`): Schlaegt die Verbindung zu `/dev/socket/wpa_<iface>` fehl, wird bis zu 3 s
+  wiederholt und der gleichwertige Pfad `/dev/socket/<iface>` bzw. `/data/misc/wifi/sockets/<iface>` versucht. Der **genaue errno**
+  steht danach in `kobo-net-guard.log` (`wpa-connect ...: errno=...`).
+- **Framework-Neustart** (`android.sh`, `wifi_heal`): Haengt WLAN nach dem Boot weiter in `SupplicantStartingState`, wird einmalig
+  `ctl.restart zygote` ausgeloest. Ergebnis steht in `net.log`. `svc wifi enable` wird nur noch zweimal versucht (scheitert auf diesem Geraet
+  am ART-Heap: `There's a gap between the image space and the main space`).
