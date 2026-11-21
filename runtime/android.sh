@@ -318,6 +318,43 @@ patch_init_selinux() {
 }
 # Stock-init meldet im Kernel-Log nur Fehler. Mit "loglevel" erscheinen seine INFO-Meldungen (Befehle, Dienststarts)
 # in dmesg -> init-dmesg.txt. Abschaltbar mit KOBO_INIT_LOGLEVEL=3 in der config.
+# KOBO_NICE_V1: Stock-init.rc setzt "setrlimit 13 40 40" (RLIMIT_NICE). Ohne das Limit (hier 0) wirft
+# Process.setThreadPriority() fuer App-Threads "SecurityException: No permission to set to given priority"
+# -> Launcher2 (LoaderTask, LauncherModel.java:1155) stirbt als "launcher-loader" kurz nach dem Start.
+patch_init_nice() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_NICE_V1' "$rc" && return 0
+    tmp="$RUN/init.rc.nice"
+    awk '{ print }
+        $1 == "on" && $2 == "init" && NF == 2 && !done {
+            print "    # KOBO_NICE_V1"
+            print "    setrlimit 13 40 40"
+            done = 1 }' "$rc" > "$tmp" || { rm -f "$tmp"; return 0; }
+    if grep -q 'KOBO_NICE_V1' "$tmp"; then cat "$tmp" > "$rc"; echo "init.rc angepasst (KOBO_NICE_V1: RLIMIT_NICE 40)"
+    else echo "WARNUNG: KOBO_NICE_V1 nicht eingefuegt (keine Zeile 'on init' in init.rc)"; fi
+    rm -f "$tmp"
+}
+# KOBO_LMKD_V1: ActivityManager schreibt jede oom_adj-Aenderung an den Socket "lmkd". Fehlt er, wartet
+# ProcessList.writeLmkd() 3 x 1 s ("SLOW OOM ADJ: 3002ms", "lowmemorykiller daemon socket open failed") und haelt dabei
+# das AMS-Lock -> System/UI haengt minutenlang (im Log 117 x). Stock-init.rc startet dafuer den Dienst lmkd.
+patch_init_lmkd() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -Eq '^service lmkd ' "$rc" && return 0
+    if [ ! -x "$ROOTFS/system/bin/lmkd" ]; then
+        echo "WARNUNG: $ROOTFS/system/bin/lmkd fehlt -> AMS blockiert weiter je 3 s pro oom_adj-Aenderung"
+        return 0
+    fi
+    {
+        echo ''
+        echo '# KOBO_LMKD_V1'
+        echo 'service lmkd /system/bin/lmkd'
+        echo '    class core'
+        echo '    socket lmkd seqpacket 0660 system system'
+    } >> "$rc"
+    echo "init.rc angepasst (KOBO_LMKD_V1: Dienst lmkd)"
+}
 patch_init_loglevel() {
     rc="$ROOTFS/init.rc"
     [ -f "$rc" ] || return 0
@@ -394,6 +431,55 @@ patch_init_datadirs() {
     cat "$tmp" > "$rc" && rm -f "$tmp"
     echo "init.rc angepasst (KOBO_DATADIRS_V1)"
 }
+# KOBO_STORAGE_ENV_V1: Ursache des Zygote-Neustarts (zygote.err): Environment.getLegacyExternalStorageDirectory() ruft
+# new File(System.getenv("EXTERNAL_STORAGE")) -> NPE in Debug.<clinit> -> ExceptionInInitializerError im Klassen-Preload.
+# Das eigene init.rc exportiert die Speicher-Variablen des Stock-init nicht.
+patch_init_storage_env() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_STORAGE_ENV_V1' "$rc" && return 0
+    tmp="$RUN/init.rc.storenv"
+    awk '{ print }
+        $1 == "on" && $2 == "late-init" && NF == 2 && !done {
+            print "    # KOBO_STORAGE_ENV_V1: Speicher-Variablen fuer zygote/system_server."
+            print "    export EXTERNAL_STORAGE /storage/sdcard"
+            print "    export ANDROID_STORAGE /storage"
+            print "    export ASEC_MOUNTPOINT /mnt/asec"
+            print "    export LOOP_MOUNTPOINT /mnt/obb"
+            done = 1
+        }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc: Storage-Env-Patch fehlgeschlagen.'; }
+    grep -q 'KOBO_STORAGE_ENV_V1' "$tmp" || { rm -f "$tmp"; fail 'init.rc: "on late-init" fehlt fuer Storage-Env-Patch.'; }
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_STORAGE_ENV_V1)"
+}
+# KOBO_NOPERSIST_V1: Ursache des Absturzes waehrend der Bootanimation (init-Log endet ~0,4 s nach dem Start von system_server):
+# Sobald "load_persist_props" gelaufen ist, schreibt init jede gesetzte persist.*-Property zusaetzlich nach /data/property
+# (write_persistent_property). Genau dabei stirbt der Android-init in diesem Chroot - reproduzierbar:
+#  - KOBO_PROPS_V2 mit 69 Eintraegen: init-Log endete direkt hinter der Zeile nach ro.config.alarm_alert, dort steht in
+#    build.prop persist.sys.dalvik.vm.lib.2 (deshalb wurden persist.* dort ausgefiltert);
+#  - load_all_props (V1): init starb sofort, weil build.prop dieselbe Property enthaelt;
+#  - jetzt, wo zygote nicht mehr abbricht: system_server setzt als allererstes SystemProperties.set("persist.sys.dalvik.vm.lib.2")
+#    -> init stirbt -> android.sh beendet Container + VNC -> das Plugin verliert das Bild.
+# Ohne "load_persist_props" bleibt persistent_properties_loaded=0: persist.*-Properties gelten nur im Speicher (init schreibt
+# nichts nach /data/property). Android-Einstellungen liegen in /data/system und /data/data und bleiben erhalten.
+patch_init_nopersist() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -Eq '^[[:space:]]*load_persist_props[[:space:]]*$' "$rc" || return 0
+    tmp="$RUN/init.rc.nopersist"
+    awk '$1 == "load_persist_props" && NF == 1 {
+            print "    # KOBO_NOPERSIST_V1: load_persist_props abgeschaltet (init stirbt beim Schreiben von persist.*-Properties)"
+            next
+        }
+        { print }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc: NoPersist-Patch fehlgeschlagen.'; }
+    grep -q 'KOBO_NOPERSIST_V1' "$tmp" || { rm -f "$tmp"; fail 'init.rc: load_persist_props nicht ersetzt.'; }
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+    # Bereits vorhandene Dateien aus frueheren Laeufen entfernen: ohne Ladevorgang werden sie ohnehin nie gelesen.
+    rm -rf "$ROOTFS/data/property" 2>/dev/null || true
+    mkdir -p "$ROOTFS/data/property" 2>/dev/null || true
+    chmod 0700 "$ROOTFS/data/property" 2>/dev/null || true
+    echo "init.rc angepasst (KOBO_NOPERSIST_V1: persist.*-Properties nur im Speicher)"
+}
 # Kernel drosselt /dev/kmsg-Schreiber (10 Zeilen/5 s je offener Datei): init-Meldungen gingen verloren.
 devkmsg_unlimit() {
     f=/proc/sys/kernel/printk_devkmsg
@@ -403,6 +489,341 @@ devkmsg_unlimit() {
 }
 devkmsg_restore() {
     [ -n "${DEVKMSG_OLD:-}" ] && echo "$DEVKMSG_OLD" > /proc/sys/kernel/printk_devkmsg 2>/dev/null || true
+}
+# KOBO_ZYGOTE_FIX_V1: zygote (app_process) bricht mit "Unable to determine ABI list from property
+# ro.product.cpu.abilist32" ab, netd ohne /data/misc/net (rt_tables, fwmarkd), installd ohne .layout_version.
+# Idempotent bei jedem Start: Props setzen und Verzeichnisse direkt im gemounteten Rootfs anlegen.
+fix_zygote_netd() {
+    bp="$ROOTFS/system/build.prop"
+    set_prop_file "$bp" ro.product.cpu.abi armeabi-v7a
+    set_prop_file "$bp" ro.product.cpu.abi2 ""
+    set_prop_file "$bp" ro.product.cpu.abilist armeabi-v7a,armeabi
+    set_prop_file "$bp" ro.product.cpu.abilist32 armeabi-v7a,armeabi
+    set_prop_file "$bp" ro.product.cpu.abilist64 ""
+    set_prop_file "$bp" ro.zygote default
+    [ -f "$ROOTFS/default.prop" ] && {
+        set_prop_file "$ROOTFS/default.prop" ro.product.cpu.abilist32 armeabi-v7a,armeabi
+        set_prop_file "$ROOTFS/default.prop" ro.product.cpu.abilist armeabi-v7a,armeabi
+    }
+    mkdir -p "$ROOTFS/data/misc/net" "$ROOTFS/data/misc/wifi/sockets" "$ROOTFS/data/misc/user/0" \
+        "$ROOTFS/data/system" "$ROOTFS/data/dalvik-cache" "$ROOTFS/data/app" "$ROOTFS/data/data"
+    chmod 0750 "$ROOTFS/data/misc/net"
+    [ -f "$ROOTFS/data/.layout_version" ] || echo 2 > "$ROOTFS/data/.layout_version"
+    chown 1000:1000 "$ROOTFS/data/system" "$ROOTFS/data/app" "$ROOTFS/data/data" "$ROOTFS/data/dalvik-cache" \
+        "$ROOTFS/data/misc/user" "$ROOTFS/data/misc/user/0" "$ROOTFS/data/.layout_version" 2>/dev/null || true
+    echo "zygote/netd-Fix angepasst (KOBO_ZYGOTE_FIX_V1)"
+}
+# KOBO_PMFIX_V1: logcat zeigt "Error reading package manager settings ... Unexpected EOF" in /data/system/packages.xml
+# (Dateiende = Muell/NUL-Bytes, mitten in einem <cert>-Eintrag abgeschnitten) -> PackageManagerService.<init> stirbt mit
+# NullPointerException in compareSignatures -> system_server -> zygote-Neustart. Ursache: ext4 data=writeback + barrier=0 +
+# commit=60 auf einer Image-Datei; nach hartem Kobo-Neustart/Absturz bleiben halb geschriebene Dateien zurueck.
+# Ist die massgebliche Datei (packages-backup.xml, falls vorhanden, sonst packages.xml) beschaedigt, wird die Paketdatenbank
+# verworfen; Android scannt /system und /data/app beim naechsten Start neu (erster Boot dauert dann laenger).
+fix_pm_settings() {
+    d="$ROOTFS/data/system"
+    [ -d "$d" ] || return 0
+    eff=packages.xml
+    [ ! -e "$d/packages-backup.xml" ] || eff=packages-backup.xml
+    [ -e "$d/$eff" ] || return 0
+    total=$(wc -c < "$d/$eff")
+    clean=$(tr -d '\000' < "$d/$eff" | wc -c)
+    if [ "$total" != "$clean" ] || ! tail -c 64 "$d/$eff" | grep -q '</packages>'; then
+        rm -f "$d/packages.xml" "$d/packages-backup.xml" "$d/packages.list" "$d/packages-stopped.xml" "$d/packages-stopped-backup.xml"
+        echo "KOBO_PMFIX_V1: beschaedigte $eff entfernt ($total Bytes, $((total - clean)) NUL-Bytes); Paketdatenbank wird neu aufgebaut."
+    fi
+}
+# KOBO_BOOTFIX_V2: (1) ART relokiert boot.art per patchoat, das hier abstuerzt ("gap between the image
+# space and the main space") -> zygote faellt auf imageless zurueck und stirbt. -Xnorelocate nutzt das
+# Original-Image. (2) netd braucht den Socket fwmarkd (sonst "Unable to start FwmarkServer" -> Neustart).
+# (3) Ohne "service bootanim" in init.rc startet surfaceflinger (ctl.start bootanim) keine Bootanimation.
+fix_boot_v2() {
+    set_prop_file "$ROOTFS/system/build.prop" dalvik.vm.extra-opts -Xnorelocate
+    rm -f "$ROOTFS"/data/dalvik-cache/arm/system@framework@boot.* 2>/dev/null || true
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    tmp="$RUN/init.rc.bootv2"
+    if ! grep -q 'socket fwmarkd' "$rc"; then
+        awk '{ print }
+            $1 == "service" && $2 == "netd" { print "    socket fwmarkd stream 0660 root inet" }' "$rc" > "$tmp" \
+            && cat "$tmp" > "$rc"; rm -f "$tmp"
+    fi
+    if ! grep -Eq '^service bootanim ' "$rc"; then
+        {
+            echo ''
+            echo '# KOBO_BOOTFIX_V2'
+            echo 'service bootanim /system/bin/bootanimation'
+            echo '    class core'
+            echo '    user graphics'
+            echo '    group graphics audio'
+            echo '    disabled'
+            echo '    oneshot'
+        } >> "$rc"
+    fi
+    # KOBO_BOOTFIX_V3: Property dalvik.vm.extra-opts wird nicht ausgewertet -> Option direkt an app_process.
+    if ! grep -E '^service zygote ' "$rc" | grep -q -- '-Xnorelocate'; then
+        awk '$1 == "service" && $2 == "zygote" && index($0, "-Xnorelocate") == 0 { sub(/-Xzygote/, "-Xzygote -Xnorelocate") } { print }' "$rc" > "$tmp" \
+            && cat "$tmp" > "$rc"; rm -f "$tmp"
+    fi
+    # KOBO_BOOTFIX_V4: svc/settings/am/pm/... starten app_process ohne -Xnorelocate -> patchoat-relokiertes Image ->
+    # "gap between the image space and the main space" (SIGABRT). Option in die Wrapper-Skripte eintragen.
+    # KOBO_BOOTFIX_V5: Muster verallgemeinert (auch "app_process $base/bin", ohne "exec"), plus dex2oat-Wrapper:
+    # installd ruft /system/bin/dex2oat ohne -Xnorelocate -> "Only the zygote can create the global boot image"
+    # -> imageless -> Heap-Abbruch. Der Wrapper setzt die Option; dex2oat.real ist das Original.
+    for w in "$ROOTFS"/system/bin/*; do
+        [ -f "$w" ] && [ ! -L "$w" ] || continue
+        # Die AOSP-Wrapper (svc, settings, pm, ime, input ...) haben KEINE #!-Zeile (sh startet sie per ENOEXEC-Fallback);
+        # deshalb nur ELF-Binaerdateien ueberspringen (KOBO_BOOTFIX_V6).
+        head -c 4 "$w" 2>/dev/null | grep -aq 'ELF' && continue
+        grep -aq 'app_process ' "$w" 2>/dev/null || continue
+        grep -aq -- '-Xnorelocate' "$w" 2>/dev/null && continue
+        sed 's#app_process \([^-]\)#app_process -Xnorelocate \1#' "$w" > "$RUN/wrap.new" && cat "$RUN/wrap.new" > "$w"
+    done
+    rm -f "$RUN/wrap.new"
+    # KOBO_HEAPGAP_V1: "gap between the image space and the main space": ART legt den Hauptheap direkt hinter boot.oat
+    # (0x73a74000) an. Dort ist bis zum PIE-Binary (app_process32/dex2oat bei ~0x7f5e3000) nur ca. 190 MB frei. Ist der
+    # reservierte Heap (-Xmx) groesser, weicht der Kernel aus -> Luecke -> Abbruch. Tools brauchen wenig: Obergrenze 96 MB.
+    for w in "$ROOTFS"/system/bin/*; do
+        [ -f "$w" ] && [ ! -L "$w" ] || continue
+        head -c 4 "$w" 2>/dev/null | grep -aq 'ELF' && continue
+        grep -aq 'app_process -Xnorelocate ' "$w" 2>/dev/null || continue
+        grep -aq -- '-Xmx' "$w" 2>/dev/null && continue
+        grep -aq -- '-Xzygote' "$w" 2>/dev/null && continue   # Zygote behaelt seinen grossen Heap
+        case "$w" in *zygote*) continue ;; esac
+        sed 's#app_process -Xnorelocate #app_process -Xnorelocate -Xmx96m -XX:HeapGrowthLimit=96m #' "$w" > "$RUN/wrap.new" && cat "$RUN/wrap.new" > "$w"
+    done
+    rm -f "$RUN/wrap.new"
+    # KOBO_DEX2OAT_V2: mit -Xnorelocate laeuft das Image, aber dex2oat scheitert an der 512-MB-Heap-Reservierung
+    # ("heap.cc:274 Failed anonymous mmap(0x0, 536870912 ...): Out of memory"). Wrapper kappt -Xmx/-Xms
+    # (KOBO_DEX2OAT_XMX in MB, Standard 256). Wird bei jedem Start neu geschrieben.
+    d2="$ROOTFS/system/bin/dex2oat"
+    if [ -f "$d2" ] && ! head -c 2 "$d2" | grep -aq '^#!'; then
+        cp "$d2" "$ROOTFS/system/bin/dex2oat.real" && chmod 0755 "$ROOTFS/system/bin/dex2oat.real"
+    fi
+    if [ -f "$ROOTFS/system/bin/dex2oat.real" ]; then
+        cat > "$d2" <<'D2EOF'
+#!/system/bin/sh
+# Heap schrittweise verkleinern, wenn die Reservierung (Out of memory / Abort) scheitert.
+conv() {
+    mx=$1; shift; flt=$1; shift
+    n=$#
+    while [ "$n" -gt 0 ]; do
+        a=$1; shift
+        case "$a" in
+            -Xmx*) a=-Xmx${mx}m ;;
+            -Xms*) a=-Xms32m ;;
+            --compiler-filter=*) [ -n "$flt" ] && a=--compiler-filter=$flt ;;
+        esac
+        set -- "$@" "$a"
+        n=$((n - 1))
+    done
+    /system/bin/dex2oat.real --runtime-arg -Xnorelocate --runtime-arg -Xmx${mx}m "$@"
+}
+conv 128 "" "$@"; rc=$?
+[ "$rc" -eq 0 ] && exit 0
+echo "dex2oat rc=$rc bei 128m: $*" >> /data/local/tmp/dex2oat-wrap.log
+conv 96 interpret-only "$@"; rc=$?
+[ "$rc" -eq 0 ] && exit 0
+echo "dex2oat rc=$rc bei 96m: $*" >> /data/local/tmp/dex2oat-wrap.log
+conv 64 interpret-only "$@"; rc=$?
+echo "dex2oat rc=$rc bei 64m" >> /data/local/tmp/dex2oat-wrap.log
+exit $rc
+D2EOF
+        chmod 0755 "$d2"
+    fi
+    [ -f "$ROOTFS/system/media/bootanimation.zip" ] || echo "WARNUNG: /system/media/bootanimation.zip fehlt im Rootfs"
+    echo "Boot-Fix V2 angewendet (norelocate, fwmarkd, bootanim)"
+}
+# KOBO_PROPS_V1: Das eigene init.rc triggert nie "load_(all|system)_props" -> /system/build.prop wird NIE geladen
+# (im Log: zygote startet mit -Xmx16m/-Xms4m, ohne HeapMinFree/dex2oat-filter; dalvik.vm.extra-opts wirkte nie).
+# (1) Heap-Properties zusaetzlich in /default.prop (wird von init immer geladen).
+# (2) build.prop wird bei jedem Start als Liste von "setprop"-Zeilen in eine eigene init.rc-Action uebersetzt.
+#     Der init-Builtin "load_all_props" ist KEINE Option: er hat init beim Start abstuerzen lassen (Container beendet).
+fix_props_v1() {
+    for f in "$ROOTFS/system/build.prop" "$ROOTFS/default.prop"; do
+        [ -f "$f" ] || continue
+        set_prop_file "$f" dalvik.vm.heapstartsize 8m
+        set_prop_file "$f" dalvik.vm.heapgrowthlimit 128m
+        set_prop_file "$f" dalvik.vm.heapsize 256m
+        set_prop_file "$f" dalvik.vm.heaptargetutilization 0.75
+        set_prop_file "$f" dalvik.vm.heapminfree 1m
+        set_prop_file "$f" dalvik.vm.heapmaxfree 4m
+    done
+    rc="$ROOTFS/init.rc"; bp="$ROOTFS/system/build.prop"
+    [ -f "$rc" ] && [ -f "$bp" ] || return 0
+    tmp="$RUN/init.rc.props"
+    # Alte Action (auch die fruehere mit "load_all_props") entfernen; fehlenden Trigger vor early-boot einfuegen.
+    awk 'BEGIN { skip = 0 }
+        $1 == "on" && $2 == "kobo_load_props" { skip = 1; next }
+        skip && ($0 ~ /^[ \t]/ || $0 ~ /^[ \t]*$/) { next }
+        { skip = 0; print }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc: Props-Patch fehlgeschlagen.'; }
+    if ! grep -q 'trigger kobo_load_props' "$tmp"; then
+        awk '$1 == "trigger" && $2 == "early-boot" && !done { print "    # KOBO_PROPS_V2: build.prop laden"; print "    trigger kobo_load_props"; done = 1 } { print }' "$tmp" > "$tmp.2" \
+            && cat "$tmp.2" > "$tmp"; rm -f "$tmp.2"
+        grep -q 'trigger kobo_load_props' "$tmp" || { rm -f "$tmp"; fail 'init.rc: "trigger early-boot" fehlt fuer Props-Patch.'; }
+    fi
+    {
+        cat "$tmp"
+        echo ''
+        echo 'on kobo_load_props'
+        awk 'BEGIN { FS = "=" }
+            /^[A-Za-z]/ && index($0, "=") > 1 {
+                k = $1; v = substr($0, length(k) + 2)
+                sub(/\r$/, "", v)
+                if (length(k) > 31 || length(v) > 91) next
+                if (k ~ /[ \t"]/ || v ~ /["\\$]/) next
+                # init stirbt mitten in der Action (Log endet nach ca. der 36. Zeile): riskante Schluessel auslassen.
+                if (k ~ /^(persist\.|ro\.kernel\.|debug\.|ro\.hardware)/) next
+                print "    setprop " k " \"" v "\""
+            }' "$bp"
+        # KOBO_NOGLES_V3: ro.kernel.* wird oben uebersprungen, HardwareRenderer.isAvailable() (API 21) braucht aber
+        # ro.kernel.qemu=1 UND qemu.gles=0, sonst startet libhwui und der Launcher bricht mit "Failed to choose config" ab.
+        if [ "${KOBO_NOGLES:-1}" = 1 ]; then
+            echo '    # KOBO_NOGLES_V3: Apps ohne Hardwarebeschleunigung (kein GLES2)'
+            echo '    setprop ro.kernel.qemu "1"'
+            echo '    setprop qemu.gles "0"'
+        fi
+    } > "$rc"
+    rm -f "$tmp"
+    # Mit init.rc-Zeilennummern ablegen: die erste NICHT im init-Log stehende Zeile ist der Ausloeser, falls init wieder stirbt.
+    awk '/^on kobo_load_props/ { f = 1 } f { print NR ": " $0 }' "$rc" > "$BASE/props-block.txt" 2>/dev/null
+    echo "init.rc angepasst (KOBO_PROPS_V2: build.prop als setprop-Liste, $(grep -c '^    setprop .* "' "$rc") Eintraege)"
+}
+# KOBO_ZYGOTE_LOG_V2: stdout/stderr von app_process gehen sonst nach /dev/null; ein unbehandelter Java-Fehler im zygote
+# (Exit-Status 0, kein Logeintrag) bleibt damit unsichtbar. Start-Skript (kein exec): schreibt Ausgabe und Exit-Code
+# nach /data/local/tmp/zygote.err. (init.rc darf kein "$" ausser "${prop}" enthalten, deshalb ein eigenes Skript.)
+fix_zygote_log() {
+    [ "${KOBO_ZYGOTE_LOG:-1}" = 1 ] || return 0
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    mkdir -p "$ROOTFS/data/local/tmp"
+    : > "$ROOTFS/data/local/tmp/zygote.err" 2>/dev/null; chmod 0666 "$ROOTFS/data/local/tmp/zygote.err" 2>/dev/null
+    cat > "$ROOTFS/system/bin/kobo-zygote.sh" <<'ZYG'
+#!/system/bin/sh
+E=/data/local/tmp/zygote.err
+[ -n "$EXTERNAL_STORAGE" ] || export EXTERNAL_STORAGE=/storage/sdcard
+[ -n "$ANDROID_STORAGE" ] || export ANDROID_STORAGE=/storage
+[ -n "$ASEC_MOUNTPOINT" ] || export ASEC_MOUNTPOINT=/mnt/asec
+[ -n "$LOOP_MOUNTPOINT" ] || export LOOP_MOUNTPOINT=/mnt/obb
+echo "=== zygote start $(date) uid=$(id)" >> $E
+# Lollipop-Toolbox kennt weder grep noch tail/head/cut/env (sonst Exit 127): nur printenv, ls, read, case.
+printenv | while read -r l; do
+    case "$l" in ANDROID_*|BOOTCLASSPATH*|LD_*|EXTERNAL*) echo "$l" >> $E ;; esac
+done
+ls -l /data/anr /data/dalvik-cache /data/dalvik-cache/arm >> $E 2>&1
+/system/bin/app_process -Xzygote -Xnorelocate /system/bin --zygote --start-system-server >> $E 2>&1
+rc=$?
+echo "=== app_process exit=$rc $(date)" >> $E
+exit $rc
+ZYG
+    chmod 0755 "$ROOTFS/system/bin/kobo-zygote.sh"
+    mkdir -p "$ROOTFS/data/anr"; chmod 0775 "$ROOTFS/data/anr"; chown 1000:1000 "$ROOTFS/data/anr" 2>/dev/null || true
+    grep -q 'kobo-zygote.sh' "$rc" && return 0
+    tmp="$RUN/init.rc.zlog"
+    awk '$1 == "service" && $2 == "zygote" { print "service zygote /system/bin/sh /system/bin/kobo-zygote.sh"; next } { print }' "$rc" > "$tmp" || { rm -f "$tmp"; return 0; }
+    grep -q 'kobo-zygote.sh' "$tmp" && cat "$tmp" > "$rc"
+    rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_ZYGOTE_LOG_V2)"
+}
+# KOBO_INSTALLD_LOG_V1: installd wird im init-Log jedes Mal ~7 ms nach dem Start mit Status 9 (SIGKILL) beendet; system_server
+# kann deshalb keine App-Datenverzeichnisse anlegen ("Unable to create data dirs [errorCode=-1]" fuer ALLE Pakete).
+# Wrapper (kein exec; Socket-Deskriptor und ANDROID_SOCKET_installd werden vererbt) schreibt Umgebung, Ausgabe und Exit-Code
+# nach /data/local/tmp/installd.err (-> $BASE/installd.err).
+fix_installd_log() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    mkdir -p "$ROOTFS/data/local/tmp"
+    : > "$ROOTFS/data/local/tmp/installd.err" 2>/dev/null; chmod 0666 "$ROOTFS/data/local/tmp/installd.err" 2>/dev/null
+    cat > "$ROOTFS/system/bin/kobo-installd.sh" <<'INS'
+#!/system/bin/sh
+# KOBO_INSTALLD_LOG_V2: Lollipop-toolbox hat kein head/grep/cut -> die V1-Diagnose war leer. Nur Builtins/toolbox-Befehle verwenden.
+E=/data/local/tmp/installd.err
+{
+echo "=== installd start $(date) $(id) umask=$(umask)"
+echo "ANDROID_SOCKET_installd=$ANDROID_SOCKET_installd LD_PRELOAD=$LD_PRELOAD ANDROID_DATA=$ANDROID_DATA ANDROID_ROOT=$ANDROID_ROOT"
+ls -l /dev/null /dev/urandom /dev/random 2>&1
+ls -l /system/bin/installd /system/bin/linker /system/lib/libkobofb.so /data /data/.layout_version /data/misc/user /data/user /data/media 2>&1
+ls -l /proc/self/fd 2>&1
+cat /proc/self/limits 2>&1
+cat /proc/self/oom_score_adj 2>&1
+cat /proc/meminfo 2>&1 | while read k v; do case "$k" in MemFree:|MemAvailable:|Cached:) echo "$k $v";; esac; done
+} >> $E 2>&1
+# Startet das Kommando im Hintergrund und merkt sich bis zum Tod den letzten Stand aus /proc (nur Shell-Builtins, kein fork).
+probe() {
+    name=$1; shift
+    echo "--- Versuch $name" >> $E
+    "$@" >> $E 2>&1 &
+    p=$!
+    sc=; wc=; st=; n=0; maps=
+    while [ -e /proc/$p/stat ]; do
+        read a < /proc/$p/syscall 2>/dev/null && sc=$a
+        read b < /proc/$p/wchan 2>/dev/null && wc=$b
+        read c < /proc/$p/stat 2>/dev/null && st=$c
+        n=$((n + 1))
+        if [ $((n % 20)) -eq 0 ]; then
+            while read l; do maps=$l; done < /proc/$p/maps 2>/dev/null
+        fi
+        case "$st" in *" Z "*) break;; esac
+    done
+    wait $p; rc=$?
+    echo "last syscall: $sc" >> $E
+    echo "last wchan:   $wc" >> $E
+    echo "last stat:    $st" >> $E
+    echo "last maps:    $maps (Polls: $n)" >> $E
+    echo "--- Ende $name rc=$rc (137=SIGKILL, 139=SIGSEGV, 134=SIGABRT)" >> $E
+    return $rc
+}
+# T: unter dem ptrace-Tracer (zeigt die letzten Systemaufrufe samt Pfad vor dem Tod) -> /data/local/tmp/sctrace.out
+if [ -x /system/bin/sctrace ]; then
+    probe T-sctrace /system/bin/sctrace /data/local/tmp/sctrace.out /system/bin/installd
+fi
+# A: unveraendert
+probe A-normal /system/bin/installd
+# B: oom_score_adj 0 (der Container erbt 1000 von android.sh; Kernel-LMK/OOM-Killer waehlt solche Prozesse zuerst)
+( echo 0 > /proc/self/oom_score_adj; probe B-oom0 /system/bin/installd )
+# C: ohne Preload und ohne Control-Socket: stirbt es hier auch, liegt es vor main() bzw. am Loader/Kernel, nicht an Socket/Verzeichnissen
+( unset ANDROID_SOCKET_installd; LD_PRELOAD=; export LD_PRELOAD; probe C-nosocket /system/bin/installd )
+echo "=== installd exit=$? $(date)" >> $E
+INS
+    chmod 0755 "$ROOTFS/system/bin/kobo-installd.sh"
+    # KOBO_SCTRACE_V1: optionaler ptrace-Tracer (liegt neben android.sh als "sctrace"); Ausgabe -> $BASE/sctrace.out
+    if [ -f "$BASE/sctrace" ]; then
+        cp "$BASE/sctrace" "$ROOTFS/system/bin/sctrace" 2>/dev/null && chmod 0755 "$ROOTFS/system/bin/sctrace" || true
+        : > "$ROOTFS/data/local/tmp/sctrace.out" 2>/dev/null; chmod 0666 "$ROOTFS/data/local/tmp/sctrace.out" 2>/dev/null || true
+    fi
+    grep -q 'kobo-installd.sh' "$rc" && return 0
+    tmp="$RUN/init.rc.ilog"
+    awk '$1 == "service" && $2 == "installd" { print "service installd /system/bin/sh /system/bin/kobo-installd.sh"; next } { print }' "$rc" > "$tmp" || { rm -f "$tmp"; return 0; }
+    grep -q 'kobo-installd.sh' "$tmp" && cat "$tmp" > "$rc"
+    rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_INSTALLD_LOG_V1)"
+}
+# KOBO_SIGTRACE_V1: installd wird sofort per SIGKILL beendet, ohne OOM-/Kernel-Meldung und unabhaengig von Preload/oom_score_adj.
+# Der Kernel-Tracepoint signal_generate nennt Absender (comm/pid), Ziel und Ergebnis jedes SIGKILL -> $BASE/sigtrace.txt.
+sigtrace_start() {
+    TRACE_DIR=
+    for d in /sys/kernel/tracing /sys/kernel/debug/tracing; do
+        [ -d "$d/events/signal" ] && { TRACE_DIR=$d; break; }
+    done
+    if [ -z "$TRACE_DIR" ]; then
+        mkdir -p /sys/kernel/debug 2>/dev/null || true
+        mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+        [ -d /sys/kernel/debug/tracing/events/signal ] && TRACE_DIR=/sys/kernel/debug/tracing
+    fi
+    if [ -z "$TRACE_DIR" ]; then
+        mount -t tracefs none /sys/kernel/tracing 2>/dev/null || true
+        [ -d /sys/kernel/tracing/events/signal ] && TRACE_DIR=/sys/kernel/tracing
+    fi
+    [ -n "$TRACE_DIR" ] || { echo "sigtrace: kein Kernel-Tracing verfuegbar"; return 0; }
+    echo 0 > "$TRACE_DIR/tracing_on" 2>/dev/null || true
+    echo > "$TRACE_DIR/trace" 2>/dev/null || true
+    echo 'sig == 9' > "$TRACE_DIR/events/signal/signal_generate/filter" 2>/dev/null || true
+    echo 1 > "$TRACE_DIR/events/signal/signal_generate/enable" 2>/dev/null || true
+    echo 1 > "$TRACE_DIR/tracing_on" 2>/dev/null || true
+    echo "sigtrace: aktiv ($TRACE_DIR, signal_generate sig==9)"
+}
+sigtrace_dump() {
+    [ -n "${TRACE_DIR:-}" ] || { echo "kein Kernel-Tracing verfuegbar (weder tracefs noch debugfs mit events/signal)" > "$BASE/sigtrace.txt"; return 0; }
+    tail -n 120 "$TRACE_DIR/trace" > "$BASE/sigtrace.txt" 2>&1
 }
 patch_init_rc() {
     # Das stock-init der Emulator-Ramdisk mountet ein frisches tmpfs auf /dev und versteckt damit
@@ -427,6 +848,29 @@ patch_init_rc() {
     grep -q 'KOBO_HOSTDEV_V1' "$tmp" || { rm -f "$tmp"; fail 'init.rc: "on early-init" nicht gefunden.'; }
     cat "$tmp" > "$rc" && rm -f "$tmp"
     echo "init.rc angepasst (KOBO_HOSTDEV_V1)"
+}
+# KOBO_URANDOM_V1: Ursache der installd-Abstuerze (sctrace.out): installd -> bionic arc4random oeffnet /dev/urandom mit
+# O_NOFOLLOW (openat-Flags 0xa8000). /dev/urandom ist hier ein Symlink nach /hostdev/urandom -> open() liefert -40 (ELOOP)
+# -> arc4random bricht per tgkill(self, SIGKILL) ab ("Killed", Exit 137, wenige ms nach dem Start).
+# Fix: /dev/urandom und /dev/random als echte Dateien anlegen und das Host-Geraet per bind-Mount darueberlegen.
+patch_init_urandom() {
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] || return 0
+    grep -q 'KOBO_URANDOM_V1' "$rc" && return 0
+    grep -Eq '^[[:space:]]*symlink /hostdev/(urandom|random) /dev/(urandom|random)' "$rc" || return 0
+    tmp="$RUN/init.rc.urandom"
+    awk '
+        $1 == "symlink" && ($2 == "/hostdev/urandom" || $2 == "/hostdev/random") {
+            dev = $2; sub("/hostdev/", "", dev)
+            if (!shown) { print "    # KOBO_URANDOM_V1: echte Datei + bind-Mount statt Symlink (bionic oeffnet /dev/urandom mit O_NOFOLLOW)"; shown = 1 }
+            print "    write /dev/" dev " 0"
+            print "    mount none /hostdev/" dev " /dev/" dev " bind"
+            next
+        }
+        { print }' "$rc" > "$tmp" || { rm -f "$tmp"; fail 'init.rc: urandom-Patch fehlgeschlagen.'; }
+    grep -q 'KOBO_URANDOM_V1' "$tmp" || { rm -f "$tmp"; return 0; }
+    cat "$tmp" > "$rc" && rm -f "$tmp"
+    echo "init.rc angepasst (KOBO_URANDOM_V1: /dev/urandom per bind-Mount statt Symlink)"
 }
 # ---- Diagnose: Stufentest (sh android.sh stages) -> stages.log -------------------------------------
 # Prueft einzeln, WO der Chroot scheitert. Startet kein init, kein zygote; alles wird danach wieder abgebaut.
@@ -495,6 +939,77 @@ stages() {
     mounted "$ROOTFS" || rmdir "$RUN/lock" 2>/dev/null || true
     echo "Stufentest fertig: $BASE/stages.log"
 }
+# KOBO_NOGLES_V1: Es gibt kein OpenGL ES 2 (nur libGLES_android = GLES 1.x). libhwui in SystemUI/Launcher bricht sonst mit
+# "F/OpenGLRenderer: Failed to choose config" per SIGABRT ab -> Neustartschleife. Im QEMU-Modus (ro.kernel.qemu=1) liest
+# HardwareRenderer.isAvailable() die Property qemu.gles: 0 = keine Hardwarebeschleunigung, Apps zeichnen per Software.
+# Wird in "on init" direkt hinter ro.kernel.qemu.gles eingefuegt; zusaetzlich als Sicherheitsnetz in build.prop.
+fix_nogles() {
+    [ "${KOBO_NOGLES:-1}" = 1 ] || return 0
+    # Die init.rc-Zeilen (ro.kernel.qemu 1, qemu.gles 0) setzt fix_props_v1 (KOBO_NOGLES_V3) im Props-Block;
+    # der fruehere awk-Anker "setprop ro.kernel.qemu.gles" existierte in der init.rc nie.
+    set_prop_file "$ROOTFS/system/build.prop" qemu.gles 0
+}
+# KOBO_CRASHWATCH_V1: eigener Hintergrundprozess, unabhaengig von bootwatch (der haengt/stirbt beim healthd-Probelauf).
+# Schreibt alle 3 s $BASE/android-full.log und $BASE/crash.txt und haelt in $BASE/deaths.txt fest, was ueber jede
+# beendete system_server-Instanz im Log steht. Hintergrund: im Chroot laufen weder logd noch debuggerd, ein nativer
+# Absturz hinterlaesst sonst keine Spur; Zygote meldet aber "Process N exited due to signal (X)" im Log.
+crashwatch() {
+    set +e
+    logf="$ROOTFS/data/local/tmp/android.log"
+    : > "$BASE/deaths.txt"; : > "$BASE/crash.txt"; : > "$BASE/android-full.log"
+    last=''; deaths=0; propsdone=''
+    while kill -0 "$container_pid" 2>/dev/null; do
+        nap "${KOBO_CRASHWATCH_SEC:-20}"
+        [ -f "$logf" ] || continue
+        tail -n 4000 "$logf" > "$BASE/android-full.log" 2>/dev/null
+        tail -n 8000 "$logf" 2>/dev/null | grep -E 'FATAL|AndroidRuntime|Process: |ANR in|has died|SIGSEGV|SIGABRT|Fatal signal|DEBUG|Zygote|system server|exited (due|cleanly)|WATCHDOG|Watchdog|WTF|Failure starting|BOOT FAILURE|Error starting|Exception' | tail -n 300 > "$BASE/crash.txt" 2>/dev/null
+        if [ -z "$propsdone" ] && grep -q 'System now ready' "$logf" 2>/dev/null; then
+            propsdone=1
+            (
+                nap 15
+                {
+                    echo "--- init.rc (qemu/gles):"; grep -n -E 'qemu|gles|NOGLES|disable_hw' "$ROOTFS/init.rc" 2>&1
+                    echo "--- build.prop (qemu/gles):"; grep -E 'qemu|gles' "$ROOTFS/system/build.prop" 2>&1
+                    echo "--- getprop (Laufzeitwerte):"
+                    tmo 8 "$(command -v env)" -i PATH=/system/bin "$(command -v chroot)" "$ROOTFS" /system/bin/sh -c 'export LD_PRELOAD=/system/lib/libkobofb.so; exec /system/bin/getprop' 2>&1 | grep -E 'qemu|gles|low_ram|egl|hardware|opengl|sf\.'
+                } > "$BASE/props.txt" 2>&1
+            ) &
+        fi
+        cur=$(tail -n 3000 "$logf" 2>/dev/null | grep -o 'SystemServer([0-9]*)' | tail -n 1 | tr -dc '0-9')
+        [ -n "$cur" ] || continue
+        if [ -n "$last" ] && [ "$cur" != "$last" ]; then
+            deaths=$((deaths + 1))
+            {
+                echo "=== $(date +%T) system_server $last beendet (neue Instanz $cur), Tod Nr. $deaths"
+                echo "--- letzte Zeilen von $last:"
+                grep "($last)" "$logf" 2>/dev/null | tail -n 40
+                echo "--- Zygote/Signal/Fatal im Log:"
+                grep -E 'Zygote|system server|exited (due|cleanly)|Fatal signal|FATAL|WATCHDOG|Watchdog|SIGSEGV|SIGABRT' "$logf" 2>/dev/null | tail -n 15
+                echo "--- Kernel (dmesg):"
+                dmesg 2>/dev/null | grep -E 'system_server|zygote|no vma|killed|oom|Out of memory|segfault|unhandled|[Ss]ignal' | tail -n 12
+                tn=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
+                [ -z "$tn" ] || { echo "--- Tombstone $tn:"; head -n 40 "$ROOTFS/data/tombstones/$tn" 2>/dev/null; }
+                echo
+            } >> "$BASE/deaths.txt" 2>&1
+            # Datei klein halten (Schleife laeuft alle ~12 s)
+            if [ "$(wc -l < "$BASE/deaths.txt" 2>/dev/null)" -gt 900 ]; then
+                tail -n 600 "$BASE/deaths.txt" > "$RUN/deaths.trim" 2>/dev/null && cat "$RUN/deaths.trim" > "$BASE/deaths.txt"; rm -f "$RUN/deaths.trim"
+            fi
+        fi
+        last=$cur
+    done
+}
+# KOBO_DEBUGGERD_V1: Ohne debuggerd gibt es bei nativen Abstuerzen weder Tombstone noch "Fatal signal"-Zeile.
+# Nur wenn /system/bin/debuggerd im Rootfs existiert; abschaltbar mit KOBO_DEBUGGERD=0.
+fix_debuggerd() {
+    [ "${KOBO_DEBUGGERD:-1}" = 1 ] || return 0
+    rc="$ROOTFS/init.rc"
+    [ -f "$rc" ] && [ -x "$ROOTFS/system/bin/debuggerd" ] || return 0
+    mkdir -p "$ROOTFS/data/tombstones"; chmod 0771 "$ROOTFS/data/tombstones"; chown 1000:1000 "$ROOTFS/data/tombstones" 2>/dev/null || true
+    grep -q '^service debuggerd ' "$rc" && return 0
+    printf '\nservice debuggerd /system/bin/debuggerd\n    class main\n' >> "$rc"
+    echo "init.rc angepasst (KOBO_DEBUGGERD_V1)"
+}
 # ---- Diagnose: Boot-Zeitachse (laeuft waehrend run im Hintergrund) -> bootwatch.log ---------------
 bootwatch() {
     set +e
@@ -517,7 +1032,10 @@ bootwatch() {
         echo "$(date +%T) t=${i}0s procs=$n boot=$(gp sys.boot_completed) sm=$(gp init.svc.servicemanager) sf=$(gp init.svc.surfaceflinger) zygote=$(gp init.svc.zygote) netd=$(gp init.svc.netd) healthd=$(gp init.svc.healthd) frei_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" >> "$w"
         init_snapshot
         # Absturzursache sichtbar machen: logcat (Fehler/Fatal) und neuester Tombstone
+        tail -n 4000 "$ROOTFS/data/local/tmp/android.log" > "$BASE/android-full.log" 2>&1
         tail -n 150 "$ROOTFS/data/local/tmp/android.log" > "$BASE/logcat.txt" 2>&1
+        tail -n 120 "$ROOTFS/data/local/tmp/zygote.err" > "$BASE/zygote.err" 2>/dev/null
+        tail -n 80 "$ROOTFS/data/local/tmp/installd.err" > "$BASE/installd.err" 2>/dev/null; sigtrace_dump || true; tail -n 200 "$ROOTFS/data/local/tmp/sctrace.out" > "$BASE/sctrace.out" 2>/dev/null || true
         {
             echo "init.svc.healthd=$(gp init.svc.healthd)"
             echo "--- ps (Android-Prozesse):"
@@ -570,6 +1088,8 @@ bootwatch() {
             rm -f "$RUN/log.trim"
         fi
         tail -n 150 "$logf" > "$BASE/logcat.txt" 2>&1
+        tail -n 80 "$ROOTFS/data/local/tmp/zygote.err" > "$BASE/zygote.err" 2>/dev/null
+        tail -n 80 "$ROOTFS/data/local/tmp/installd.err" > "$BASE/installd.err" 2>/dev/null; sigtrace_dump || true; tail -n 200 "$ROOTFS/data/local/tmp/sctrace.out" > "$BASE/sctrace.out" 2>/dev/null || true
         tail -n 4000 "$logf" > "$BASE/android-full.log" 2>&1
         tail -n 8000 "$logf" 2>/dev/null | grep -E 'FATAL EXCEPTION|AndroidRuntime|Process: |ANR in|has died|SIGSEGV|DEBUG ' -A12 | tail -n 300 > "$BASE/crash.txt"
         t=$(ls -t "$ROOTFS"/data/tombstones 2>/dev/null | head -n 1)
@@ -592,10 +1112,17 @@ cleanup() {
     fi
     if [ -n "${watchdog_pid:-}" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi
     if [ -n "${watch_pid:-}" ]; then kill "$watch_pid" 2>/dev/null || true; fi
+    if [ -n "${crash_pid:-}" ]; then kill "$crash_pid" 2>/dev/null || true; fi
     if [ -n "${ime_fix_pid:-}" ]; then kill "$ime_fix_pid" 2>/dev/null || true; fi
     if [ -n "${net_pid:-}" ]; then kill "$net_pid" 2>/dev/null || true; fi
     if [ -f "$BASE/android-init.log" ] || [ -n "${container_pid:-}" ]; then
         dmesg 2>/dev/null | grep -E 'init:|<init>|servicemanager|zygote|surfaceflinger|binder' | tail -n 200 >> "$BASE/android-init.log" 2>/dev/null || true
+        # Kernel-seitige Ursachen, die der Filter oben nicht zeigt (OOM/LMK-Kills, Oops, Panic, Watchdog).
+        {
+            echo "--- Kernel-Ereignisse (OOM/LMK/Oops/Panic) $(date +%T):"
+            dmesg 2>/dev/null | grep -iE 'lowmemorykiller|out of memory|killed process|kill process|oom-killer|panic|oops|BUG:|segfault|unhandled|watchdog|avc:' | tail -n 40
+            echo "--- Ende Kernel-Ereignisse"
+        } >> "$BASE/android-init.log" 2>/dev/null || true
     fi
     if [ -n "${vnc_pid:-}" ]; then
         kill -TERM "$vnc_pid" 2>/dev/null || true
@@ -703,12 +1230,18 @@ on init
     setprop wifi.interface $iface
     setprop wlan.driver.status ok
 
-service wpa_supplicant /system/bin/kobo-wpa --supplicant $iface
+# KOBO_WIFIBRIDGE_V1: Die Supplicant-Attrappe laeuft dauerhaft ab Boot, damit /dev/socket/wpa_$iface existiert,
+# bevor system_server verbindet (sonst: "Unable to open connection to supplicant" -> WifiMonitor tot -> WLAN
+# bleibt bei "wird aktiviert"). wpa_supplicant/p2p_supplicant sind nur noch Platzhalter fuer ctl.start/ctl.stop.
+service kobo_wpa_bridge /system/bin/kobo-wpa-run --supplicant $iface
+    class main
+
+service wpa_supplicant /system/bin/kobo-wpa --idle
     class main
     disabled
     oneshot
 
-service p2p_supplicant /system/bin/kobo-wpa --supplicant $iface
+service p2p_supplicant /system/bin/kobo-wpa --idle
     class main
     disabled
     oneshot
@@ -739,9 +1272,19 @@ net_install() {
     mkdir -p "$ROOTFS/data/misc/wifi/sockets" "$ROOTFS/data/misc/dhcp"
     # Lollipop sucht den Supplicant-Socket in IFACE_DIR=/data/system/wpa_supplicant (existiert das Verzeichnis)
     # bzw. /dev/socket/<iface>, NICHT in data/misc/wifi/sockets. kobo-wpa lauscht auf allen Pfaden.
-    mkdir -p "$ROOTFS/data/system/wpa_supplicant"
-    chown 1010:1010 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
-    chmod 0771 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
+    # KOBO_WIFIPATH_V1: Zweiter Pfad. Mit KOBO_WIFI_PATHMODE=android (Standard) fehlt IFACE_DIR; Lollipop nimmt dann
+    # "@android:wpa_<iface>" und verbindet per socket_local_client_connect auf /dev/socket/wpa_<iface>.
+    # KOBO_WIFI_PATHMODE=iface stellt das alte Verhalten (IFACE_DIR/<iface>) wieder her.
+    if [ "${KOBO_WIFI_PATHMODE:-android}" = iface ]; then
+        mkdir -p "$ROOTFS/data/system/wpa_supplicant"
+        chown 1010:1010 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
+        chmod 0771 "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
+        printf '#!/system/bin/sh\nexec /system/bin/kobo-wpa "$@"\n' > "$ROOTFS/system/bin/kobo-wpa-run"
+    else
+        rm -rf "$ROOTFS/data/system/wpa_supplicant" 2>/dev/null || true
+        printf '#!/system/bin/sh\nKOBO_WPA_ALT_DIR= exec /system/bin/kobo-wpa "$@"\n' > "$ROOTFS/system/bin/kobo-wpa-run"
+    fi
+    chmod 0755 "$ROOTFS/system/bin/kobo-wpa-run"
     chown 1010:1010 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
     chmod 0770 "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" 2>/dev/null || true
     chown 1014:1000 "$ROOTFS/data/misc/dhcp" 2>/dev/null || true
@@ -765,23 +1308,43 @@ android_run() {
         KOBO_LOG_FILE=/data/local/tmp/android.log KOBO_BINDER_LOG=/data/local/tmp/kobo-binder.log \
         "$CHROOT_BIN" "$ROOTFS" "$@"
 }
+# KOBO_WIFIPERM_V1: Falls system_server die Gruppe wifi (1010) nicht wirksam hat, scheitert wpa_ctrl_open an
+# Verzeichnis-/Socket-Rechten. Alles fuer alle zugaenglich machen (Chroot, kein Sicherheitsgewinn durch 0770).
+net_open_perms() {
+    for d in data/system/wpa_supplicant data/misc/wifi data/misc/wifi/sockets; do
+        [ -d "$ROOTFS/$d" ] && chmod 0777 "$ROOTFS/$d" 2>/dev/null
+    done
+    for f in "$ROOTFS"/data/system/wpa_supplicant/* "$ROOTFS"/data/misc/wifi/sockets/* "$ROOTFS"/dev/socket/wlan0 "$ROOTFS"/dev/socket/wpa_*; do
+        [ -S "$f" ] && chmod 0666 "$f" 2>/dev/null
+    done
+    return 0
+}
 netboot() {
     set +e
+    : > "$BASE/net.log"
     iface=$1; i=0
     while [ "$i" -lt 150 ] && kill -0 "$container_pid" 2>/dev/null; do
         [ "$(agp sys.boot_completed)" = 1 ] && break
-        net_write_env "$iface"; nap 2; i=$((i + 1))
+        net_write_env "$iface"; net_open_perms; nap 2; i=$((i + 1))
     done
     nap 10
     # Android-Einstellungen: WLAN an, Installation aus fremden Quellen erlauben (APK aus dem Browser).
     t=0
     while [ "$t" -lt 4 ] && kill -0 "$container_pid" 2>/dev/null; do
+        net_open_perms
+        echo "=== $(date +%T) svc wifi enable (Versuch $t)" >> "$BASE/net.log"
         android_run /system/bin/svc wifi enable >> "$BASE/net.log" 2>&1
+        echo "rc=$?" >> "$BASE/net.log"
+        grep -E 'F/|Abort message|Check failed|art/runtime|VM exiting|FATAL' "$ROOTFS/data/local/tmp/android.log" 2>/dev/null | tail -n 12 | cut -c1-240 >> "$BASE/net.log"
+        net_open_perms
         nap 8
         [ "$(agp init.svc.wpa_supplicant)" = running ] && break
         t=$((t + 1))
     done
+    echo "=== $(date +%T) settings put" >> "$BASE/net.log"
     android_run /system/bin/settings put secure install_non_market_apps 1 >> "$BASE/net.log" 2>&1
+    echo "rc=$?" >> "$BASE/net.log"
+        grep -E 'F/|Abort message|Check failed|art/runtime|VM exiting|FATAL' "$ROOTFS/data/local/tmp/android.log" 2>/dev/null | tail -n 12 | cut -c1-240 >> "$BASE/net.log"
     nap 25
     {
         echo "=== $(date +%T) Host:"; "$BASE/bin/kobo-wpa" --ipinfo "$iface" 2>&1
@@ -797,6 +1360,30 @@ netboot() {
         for d in data/system/wpa_supplicant data/misc/wifi data/misc/wifi/sockets dev/socket; do
             echo "[$d]"; ls -ln "$ROOTFS/$d" 2>&1 | head -n 30
         done
+        echo "--- system_server Rechte (KOBO_WIFIPERM_V1):"
+        sp=$(agp sys.system_server_pid); [ -n "$sp" ] || sp=$(ps 2>/dev/null | awk '/system_server/ {print $1; exit}')
+        grep -E '^(Uid|Gid|Groups|Cap[A-Za-z]*):' "/proc/$sp/status" 2>&1
+        ls -ldn "$ROOTFS/data/misc/wifi" "$ROOTFS/data/misc/wifi/sockets" "$ROOTFS/data/system/wpa_supplicant" 2>&1
+        echo "--- dalvik-cache/arm:"; ls -ln "$ROOTFS/data/dalvik-cache/arm" 2>&1 | head -n 20
+        echo "--- Wrapper (norelocate):"; grep -l -- '-Xnorelocate' "$ROOTFS"/system/bin/* 2>/dev/null
+        echo "--- svc/settings/pm/ime/input im Rootfs:"
+        for t in svc settings pm ime input; do ls -l "$ROOTFS/system/bin/$t" 2>&1; head -n 4 "$ROOTFS/system/bin/$t" 2>&1 | cut -c1-160; done
+        echo "--- system_server fd/limits:"
+        ls "/proc/$sp/fd" 2>/dev/null | wc -l; grep -E 'open files|address space' "/proc/$sp/limits" 2>&1
+        echo "--- dex2oat-wrap.log:"; tail -n 12 "$ROOTFS/data/local/tmp/dex2oat-wrap.log" 2>&1
+        echo "--- Speicher:"; grep -E '^(MemTotal|MemAvailable|CommitLimit|Committed_AS):' /proc/meminfo; cat /proc/sys/vm/overcommit_memory 2>&1
+        echo "--- strace system_server (wpa_ctrl_open), 25 s:"
+        stb=""; for c in /system/xbin/strace /system/bin/strace; do [ -x "$ROOTFS$c" ] && stb=$c && break; done
+        if [ -n "$stb" ] && [ -n "$sp" ]; then
+            rm -f "$ROOTFS/data/local/tmp/strace-wifi.txt"
+            android_run "$stb" -f -tt -s 96 -e trace=socket,bind,connect,chown,chmod,unlink,sendto -o /data/local/tmp/strace-wifi.txt -p "$sp" >/dev/null 2>&1 &
+            st_pid=$!; nap 25; kill "$st_pid" 2>/dev/null; pkill -f "$stb -f" 2>/dev/null
+            ls -l "$ROOTFS/data/local/tmp/strace-wifi.txt" 2>&1
+            grep -E 'wpa|wlan|sockets|= -1' "$ROOTFS/data/local/tmp/strace-wifi.txt" 2>&1 | head -n 60
+            echo "(erste Zeilen ungefiltert:)"; head -n 15 "$ROOTFS/data/local/tmp/strace-wifi.txt" 2>&1 | cut -c1-200
+        else
+            echo "kein strace im Rootfs oder system_server-PID unbekannt (stb=$stb sp=$sp)"
+        fi
         echo "--- ps (kobo-wpa):"; ps 2>/dev/null | grep '[k]obo-wpa'
         echo "--- Android-Log (wifi/wpa/dhcp/netd), letzte 100 Zeilen:"
         grep -i 'wifi\|wpa\|supplicant\|dhcp\|WifiHW\|NetworkManagement' "$ROOTFS/data/local/tmp/android.log" 2>&1 | tail -n 100
@@ -827,7 +1414,7 @@ start_ime_fix() {
 run() {
     root_required
     mkdir "$RUN/lock" 2>/dev/null || fail 'Schon gestartet oder alte Mounts vorhanden; status/recover prüfen.'
-    container_pid='' vnc_pid='' watchdog_pid='' watch_pid='' ime_fix_pid='' net_pid='' NET_IFACE=''
+    container_pid='' vnc_pid='' watchdog_pid='' watch_pid='' crash_pid='' ime_fix_pid='' net_pid='' NET_IFACE=''
     trap cleanup EXIT
     trap 'exit 0' INT TERM HUP
     echo $$ > "$RUN/runner.pid"
@@ -844,12 +1431,25 @@ run() {
     ENVB="$ENV_BIN"
     start_ime_fix
     patch_init_rc
+    patch_init_urandom
     patch_init_lateinit
     patch_init_preload
     patch_init_datadirs
+    patch_init_storage_env
+    patch_init_nopersist
     patch_init_loglevel
+    patch_init_nice
+    patch_init_lmkd
     patch_init_selinux
     apply_perf_tuning
+    fix_zygote_netd
+    fix_pm_settings
+    fix_boot_v2
+    fix_props_v1
+    fix_nogles
+    mkdir -p "$ROOTFS/data/local/tmp"
+    fix_zygote_log
+    fix_installd_log
     # Statisches /sbin/healthd ignoriert LD_PRELOAD (Binder-Shim) -> batteryproperties fehlt -> Boot-Schleife.
     grep -aq '/system/bin/linker' "$ROOTFS/sbin/healthd" 2>/dev/null || fail 'Rootfs veraltet: /sbin/healthd ist statisch (kein kobo-healthd). Neues Paket installieren.'
     mkdir -p "$ROOTFS/data/local/tmp"
@@ -863,6 +1463,7 @@ run() {
         [ -z "$NET_IFACE" ] || net_write_env "$NET_IFACE"
     fi
     rm -rf "$ROOTFS/data/tombstones" 2>/dev/null || true; rm -f "$BASE/logcat.txt" "$BASE/tombstone.txt"
+    fix_debuggerd
     # Replace image-provided dangling proc/sys symlinks with mountpoint dirs.
     # The official image may inherit these links from its emulator product.
     [ ! -L "$ROOTFS/proc" ] || rm -f "$ROOTFS/proc"
@@ -909,6 +1510,15 @@ run() {
     if mount -o bind /sys "$ROOTFS/sys" 2>/dev/null; then
         mount -o remount,bind,ro "$ROOTFS/sys" 2>/dev/null || echo "Hinweis: /sys konnte nicht auf ro gesetzt werden."
         echo "sys: Host-/sys (ro) im Chroot eingebunden"
+        # Android oeffnet /sys/power/wake_lock lesend+schreibend (libcutils power.c, PowerManagerService): auf dem ro-Mount
+        # scheitert das ("fatal error opening /sys/power/wake_lock" in zygote.err). Attrappen-Dateien darueber legen:
+        # Android bekommt Erfolg, der Host-Kernel erhaelt nie echte Wakelocks.
+        for wl in wake_lock wake_unlock; do
+            if [ -e "/sys/power/$wl" ] && [ -e "$ROOTFS/sys/power/$wl" ]; then
+                : > "$RUN/shared/fake_$wl"; chmod 0666 "$RUN/shared/fake_$wl"
+                mount -o bind "$RUN/shared/fake_$wl" "$ROOTFS/sys/power/$wl" 2>/dev/null && echo "sys: /sys/power/$wl durch Attrappe ersetzt" || echo "Hinweis: /sys/power/$wl nicht ersetzbar."
+            fi
+        done
     else
         echo "Hinweis: /sys nicht eingebunden."
     fi
@@ -944,6 +1554,7 @@ run() {
     fi
     [ -c "$ROOTFS/hostdev/binder" ] && [ -d "$ROOTFS/hostdev/kobo" ] || fail 'hostdev unvollstaendig.'
     echo "hostdev bereit: $(ls "$ROOTFS/hostdev" | tr '\n' ' ')"
+    sigtrace_start || true
     if [ "$proc_ready" = 1 ]; then
         echo "Start per Shell-chroot (kobo-container umgangen)"
         # env -i replaces PATH, so resolve host binaries to absolute paths first.
@@ -960,10 +1571,21 @@ run() {
     container_pid=$!
     echo "$container_pid" > "$RUN/container.pid"
     watchdog & watchdog_pid=$!
-    bootwatch & watch_pid=$!
+    # KOBO_DIAG=0 schaltet die Hintergrund-Diagnose ab (crashwatch fuellt sonst android-full.log/crash.txt und kostet CPU).
+    if [ "${KOBO_DIAG:-1}" = 0 ]; then watch_pid=''; crash_pid=''
+    else
+        bootwatch & watch_pid=$!
+        crashwatch & crash_pid=$!
+    fi
     if [ -n "$NET_IFACE" ]; then netboot "$NET_IFACE" & net_pid=$!; fi
     touch "$RUN/ready"
     while kill -0 "$container_pid" 2>/dev/null && kill -0 "$vnc_pid" 2>/dev/null; do nap 1; done
+    # Wer ist gestorben, und wie? (Exit-Status 128+N = Signal N: 137 = SIGKILL, 139 = SIGSEGV, 134 = SIGABRT)
+    if ! kill -0 "$container_pid" 2>/dev/null; then
+        c_rc=0; wait "$container_pid" 2>/dev/null || c_rc=$?
+        echo "Android-init (PID $container_pid) beendet, Exit-Status $c_rc."
+    fi
+    kill -0 "$vnc_pid" 2>/dev/null || echo "kobo-vnc (PID $vnc_pid) beendet."
     echo 'Android oder die VNC-Brücke wurde beendet.'
 }
 # ---- Optional: Google-Apps (Core) in das Android-Image installieren -----------------------------
@@ -1084,7 +1706,7 @@ data_reset() {
     rm -f "$BASE/rootfs.img" "$BASE"/rootfs.img.new.*
     rm -f "$RUN/runner.pid" "$RUN/container.pid" "$RUN/vnc.pid" "$RUN/ready" "$RUN/gapps.list" "$RUN/gapps.names"
     rmdir "$RUN/lock" 2>/dev/null || true
-    for f in android.log android-init.log bootwatch.log watchdog.log watchdog.last stages.log logcat.txt tombstone.txt healthd.txt egl.txt; do
+    for f in android.log android-init.log bootwatch.log watchdog.log watchdog.last installd.err sigtrace.txt sctrace.out zygote.err stages.log logcat.txt tombstone.txt healthd.txt egl.txt crash.txt android-full.log deaths.txt props.txt; do
         rm -f "$BASE/$f"
     done
     sync

@@ -766,6 +766,15 @@ static int kw_ipinfo(const char *iface)
     return 0;
 }
 
+/* --idle: Platzhalter fuer die init-Dienste wpa_supplicant/p2p_supplicant. Die eigentliche Attrappe laeuft
+ * dauerhaft als Dienst kobo_wpa_bridge (Sockets existieren schon vor system_server). Android sieht nur
+ * init.svc.wpa_supplicant=running und kann den Dienst beliebig starten/stoppen. */
+static int kw_idle(void)
+{
+    for (;;) pause();
+    return 0;
+}
+
 #ifndef KOBO_WIFI_TEST
 int main(int argc, char **argv)
 {
@@ -775,10 +784,11 @@ int main(int argc, char **argv)
     if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'i') { mode = "--supplicant"; iface = argv[1] + 2; }
     if (strlen(iface) >= IFNAMSIZ) { fputs("Schnittstellenname zu lang\n", stderr); return 2; }
     if (!strcmp(mode, "--supplicant")) return kw_supplicant(iface);
+    if (!strcmp(mode, "--idle")) return kw_idle();
     if (!strcmp(mode, "--dhcp")) return kw_dhcp(iface);
     if (!strcmp(mode, "--ipinfo")) return kw_ipinfo(iface);
     if (!strcmp(mode, "--probe")) return kw_probe(iface);
-    fputs("Aufruf: kobo-wpa --supplicant|--dhcp|--ipinfo|--probe IFACE\n", stderr);
+    fputs("Aufruf: kobo-wpa --supplicant|--idle|--dhcp|--ipinfo|--probe IFACE\n", stderr);
     return 2;
 }
 #endif
